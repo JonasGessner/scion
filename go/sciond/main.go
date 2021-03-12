@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package sciond_bin
 
 import (
 	"context"
 	"net"
-	"net/http"
 	_ "net/http/pprof"
 	"time"
 
@@ -41,7 +40,6 @@ import (
 	"github.com/scionproto/scion/go/lib/scrypto/signed"
 	"github.com/scionproto/scion/go/lib/serrors"
 	"github.com/scionproto/scion/go/lib/topology"
-	"github.com/scionproto/scion/go/pkg/app/launcher"
 	libgrpc "github.com/scionproto/scion/go/pkg/grpc"
 	"github.com/scionproto/scion/go/pkg/hiddenpath"
 	hpgrpc "github.com/scionproto/scion/go/pkg/hiddenpath/grpc"
@@ -52,7 +50,6 @@ import (
 	"github.com/scionproto/scion/go/pkg/sciond/drkey"
 	dk_grpc "github.com/scionproto/scion/go/pkg/sciond/drkey/grpc"
 	"github.com/scionproto/scion/go/pkg/sciond/fetcher"
-	"github.com/scionproto/scion/go/pkg/service"
 	"github.com/scionproto/scion/go/pkg/storage"
 	"github.com/scionproto/scion/go/pkg/trust"
 	"github.com/scionproto/scion/go/pkg/trust/compat"
@@ -61,20 +58,24 @@ import (
 
 var globalCfg config.Config
 
-func main() {
-	application := launcher.Application{
-		TOMLConfig: &globalCfg,
-		ShortName:  "SCION Daemon",
-		Main:       realMain,
-	}
-	application.Run()
+func Daemon_Config() *config.Config {
+	return &globalCfg;
 }
+
+// func main() {
+// 	application := launcher.Application{
+// 		TOMLConfig: &globalCfg,
+// 		ShortName:  "SCION Daemon",
+// 		Main:       realMain,
+// 	}
+// 	application.Run()
+// }
 
 const (
 	shutdownWaitTimeout = 5 * time.Second
 )
 
-func realMain() error {
+func Sciond_RealMain() error {
 	if err := setup(); err != nil {
 		return err
 	}
@@ -212,17 +213,17 @@ func realMain() error {
 		}
 	}()
 
-	// Start HTTP endpoints.
-	statusPages := service.StatusPages{
-		"info":      service.NewInfoHandler(),
-		"config":    service.NewConfigHandler(globalCfg),
-		"topology":  itopo.TopologyHandler,
-		"log/level": log.ConsoleLevel.ServeHTTP,
-	}
-	if err := statusPages.Register(http.DefaultServeMux, globalCfg.General.ID); err != nil {
-		return serrors.WrapStr("registering status pages", err)
-	}
-	globalCfg.Metrics.StartPrometheus()
+	// // Start HTTP endpoints.
+	// statusPages := service.StatusPages{
+	// 	"info":      service.NewInfoHandler(),
+	// 	"config":    service.NewConfigHandler(globalCfg),
+	// 	"topology":  itopo.TopologyHandler,
+	// 	"log/level": log.ConsoleLevel.ServeHTTP,
+	// }
+	// if err := statusPages.Register(http.DefaultServeMux, globalCfg.General.ID); err != nil {
+	// 	return serrors.WrapStr("registering status pages", err)
+	// }
+	// globalCfg.Metrics.StartPrometheus()
 
 	select {
 	case <-fatal.ShutdownChan():

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build go1.9,linux
+//// +build go1.9,linux
 
 // Package conn implements underlay sockets with additional metadata on reads.
 package conn
@@ -54,7 +54,7 @@ type Messages []ipv4.Message
 // reads.
 type Conn interface {
 	Read(common.RawBytes) (int, *ReadMeta, error)
-	ReadBatch(Messages, []ReadMeta) (int, error)
+	// ReadBatch(Messages, []ReadMeta) (int, error)
 	Write(common.RawBytes) (int, error)
 	WriteTo(common.RawBytes, *net.UDPAddr) (int, error)
 	WriteBatch(Messages) (int, error)
@@ -117,22 +117,22 @@ func newConnUDPIPv4(listen, remote *net.UDPAddr, cfg *Config) (*connUDPIPv4, err
 
 // ReadBatch reads up to len(msgs) packets, and stores them in msgs, with their
 // corresponding ReadMeta in metas. It returns the number of packets read, and an error if any.
-func (c *connUDPIPv4) ReadBatch(msgs Messages, metas []ReadMeta) (int, error) {
-	for i := range metas {
-		metas[i].reset()
-	}
-	n, err := c.pconn.ReadBatch(msgs, syscall.MSG_WAITFORONE)
-	readTime := time.Now()
-	for i := 0; i < n; i++ {
-		msg := msgs[i]
-		meta := &metas[i]
-		if msg.NN > 0 {
-			c.handleCmsg(msg.OOB[:msg.NN], meta, readTime)
-		}
-		meta.setSrc(c.Remote, msg.Addr.(*net.UDPAddr), underlay.UDPIPv4)
-	}
-	return n, err
-}
+// func (c *connUDPIPv4) ReadBatch(msgs Messages, metas []ReadMeta) (int, error) {
+// 	for i := range metas {
+// 		metas[i].reset()
+// 	}
+// 	n, err := c.pconn.ReadBatch(msgs, syscall.MSG_WAITFORONE)
+// 	readTime := time.Now()
+// 	for i := 0; i < n; i++ {
+// 		msg := msgs[i]
+// 		meta := &metas[i]
+// 		if msg.NN > 0 {
+// 			c.handleCmsg(msg.OOB[:msg.NN], meta, readTime)
+// 		}
+// 		meta.setSrc(c.Remote, msg.Addr.(*net.UDPAddr), underlay.UDPIPv4)
+// 	}
+// 	return n, err
+// }
 
 func (c *connUDPIPv4) WriteBatch(msgs Messages) (int, error) {
 	return c.pconn.WriteBatch(msgs, 0)
@@ -167,22 +167,22 @@ func newConnUDPIPv6(listen, remote *net.UDPAddr, cfg *Config) (*connUDPIPv6, err
 
 // ReadBatch reads up to len(msgs) packets, and stores them in msgs, with their
 // corresponding ReadMeta in metas. It returns the number of packets read, and an error if any.
-func (c *connUDPIPv6) ReadBatch(msgs Messages, metas []ReadMeta) (int, error) {
-	for i := range metas {
-		metas[i].reset()
-	}
-	n, err := c.pconn.ReadBatch(msgs, syscall.MSG_WAITFORONE)
-	readTime := time.Now()
-	for i := 0; i < n; i++ {
-		msg := msgs[i]
-		meta := &metas[i]
-		if msg.NN > 0 {
-			c.handleCmsg(msg.OOB[:msg.NN], meta, readTime)
-		}
-		meta.setSrc(c.Remote, msg.Addr.(*net.UDPAddr), underlay.UDPIPv6)
-	}
-	return n, err
-}
+// func (c *connUDPIPv6) ReadBatch(msgs Messages, metas []ReadMeta) (int, error) {
+// 	for i := range metas {
+// 		metas[i].reset()
+// 	}
+// 	n, err := c.pconn.ReadBatch(msgs, syscall.MSG_WAITFORONE)
+// 	readTime := time.Now()
+// 	for i := 0; i < n; i++ {
+// 		msg := msgs[i]
+// 		meta := &metas[i]
+// 		if msg.NN > 0 {
+// 			c.handleCmsg(msg.OOB[:msg.NN], meta, readTime)
+// 		}
+// 		meta.setSrc(c.Remote, msg.Addr.(*net.UDPAddr), underlay.UDPIPv6)
+// 	}
+// 	return n, err
+// }
 
 func (c *connUDPIPv6) WriteBatch(msgs Messages) (int, error) {
 	return c.pconn.WriteBatch(msgs, 0)
@@ -228,14 +228,14 @@ func (cc *connUDPBase) initConnUDP(network string, laddr, raddr *net.UDPAddr, cf
 		}
 	}
 	// Set reporting socket options
-	if err := sockctrl.SetsockoptInt(c, syscall.SOL_SOCKET, syscall.SO_RXQ_OVFL, 1); err != nil {
-		return serrors.WrapStr("Error setting SO_RXQ_OVFL socket option", err,
-			"listen", laddr, "remote", raddr)
-	}
-	if err := sockctrl.SetsockoptInt(c, syscall.SOL_SOCKET, syscall.SO_TIMESTAMPNS, 1); err != nil {
-		return serrors.WrapStr("Error setting SO_TIMESTAMPNS socket option", err,
-			"listen", laddr, "remote", raddr)
-	}
+	// if err := sockctrl.SetsockoptInt(c, syscall.SOL_SOCKET, syscall.SO_RXQ_OVFL, 1); err != nil {
+	// 	return serrors.WrapStr("Error setting SO_RXQ_OVFL socket option", err,
+	// 		"listen", laddr, "remote", raddr)
+	// }
+	// if err := sockctrl.SetsockoptInt(c, syscall.SOL_SOCKET, syscall.SO_TIMESTAMPNS, 1); err != nil {
+	// 	return serrors.WrapStr("Error setting SO_TIMESTAMPNS socket option", err,
+	// 		"listen", laddr, "remote", raddr)
+	// }
 	// Set and confirm receive buffer size
 	before, err := sockctrl.GetsockoptInt(c, syscall.SOL_SOCKET, syscall.SO_RCVBUF)
 	if err != nil {
@@ -303,18 +303,18 @@ func (c *connUDPBase) handleCmsg(oob common.RawBytes, meta *ReadMeta, readTime t
 				"listen", c.Listen, "remote", c.Remote, "max", len(oob), "actual", hdr.Len)
 			return
 		}
-		switch {
-		case hdr.Level == syscall.SOL_SOCKET && hdr.Type == syscall.SO_RXQ_OVFL:
-			meta.RcvOvfl = *(*uint32)(unsafe.Pointer(&oob[sizeofCmsgHdr]))
-		case hdr.Level == syscall.SOL_SOCKET && hdr.Type == syscall.SO_TIMESTAMPNS:
-			tv := *(*syscall.Timespec)(unsafe.Pointer(&oob[sizeofCmsgHdr]))
-			meta.Recvd = time.Unix(int64(tv.Sec), int64(tv.Nsec))
-			meta.ReadDelay = readTime.Sub(meta.Recvd)
-			// Guard against leap-seconds.
-			if meta.ReadDelay < 0 {
-				meta.ReadDelay = 0
-			}
-		}
+		// switch {
+		// case hdr.Level == syscall.SOL_SOCKET && hdr.Type == syscall.SO_RXQ_OVFL:
+		// 	meta.RcvOvfl = *(*uint32)(unsafe.Pointer(&oob[sizeofCmsgHdr]))
+		// case hdr.Level == syscall.SOL_SOCKET && hdr.Type == syscall.SO_TIMESTAMPNS:
+		// 	tv := *(*syscall.Timespec)(unsafe.Pointer(&oob[sizeofCmsgHdr]))
+		// 	meta.Recvd = time.Unix(int64(tv.Sec), int64(tv.Nsec))
+		// 	meta.ReadDelay = readTime.Sub(meta.Recvd)
+		// 	// Guard against leap-seconds.
+		// 	if meta.ReadDelay < 0 {
+		// 		meta.ReadDelay = 0
+		// 	}
+		// }
 		// What we actually want is the padded length of the cmsg, but CmsgLen
 		// adds a CmsgHdr length to the result, so we subtract that.
 		oob = oob[syscall.CmsgLen(int(hdr.Len))-sizeofCmsgHdr:]

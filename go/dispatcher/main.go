@@ -13,11 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package dispatcher_bin
 
 import (
 	"fmt"
-	"net/http"
 	_ "net/http/pprof"
 	"os"
 
@@ -28,22 +27,24 @@ import (
 	"github.com/scionproto/scion/go/lib/serrors"
 	"github.com/scionproto/scion/go/lib/slayers/path"
 	"github.com/scionproto/scion/go/lib/util"
-	"github.com/scionproto/scion/go/pkg/app/launcher"
-	"github.com/scionproto/scion/go/pkg/service"
 )
 
 var globalCfg config.Config
 
-func main() {
-	application := launcher.Application{
-		TOMLConfig: &globalCfg,
-		ShortName:  "SCION Dispatcher",
-		Main:       realMain,
-	}
-	application.Run()
+func Dispatcher_Config() *config.Config {
+	return &globalCfg;
 }
 
-func realMain() error {
+// func main() {
+// 	application := launcher.Application{
+// 		TOMLConfig: &globalCfg,
+// 		ShortName:  "SCION Dispatcher",
+// 		Main:       realMain,
+// 	}
+// 	application.Run()
+// }
+
+func Dispatcher_RealMain() error {
 	if err := util.CreateParentDirs(globalCfg.Dispatcher.ApplicationSocket); err != nil {
 		return serrors.WrapStr("creating directory tree for socket", err)
 	}
@@ -65,15 +66,15 @@ func realMain() error {
 	}()
 
 	// Start HTTP endpoints.
-	statusPages := service.StatusPages{
-		"info":      service.NewInfoHandler(),
-		"config":    service.NewConfigHandler(globalCfg),
-		"log/level": log.ConsoleLevel.ServeHTTP,
-	}
-	if err := statusPages.Register(http.DefaultServeMux, globalCfg.Dispatcher.ID); err != nil {
-		return serrors.WrapStr("registering status pages", err)
-	}
-	globalCfg.Metrics.StartPrometheus()
+	// statusPages := service.StatusPages{
+	// 	"info":      service.NewInfoHandler(),
+	// 	"config":    service.NewConfigHandler(globalCfg),
+	// 	"log/level": log.ConsoleLevel.ServeHTTP,
+	// }
+	// if err := statusPages.Register(http.DefaultServeMux, globalCfg.Dispatcher.ID); err != nil {
+	// 	return serrors.WrapStr("registering status pages", err)
+	// }
+	// globalCfg.Metrics.StartPrometheus()
 
 	defer deleteSocket(globalCfg.Dispatcher.ApplicationSocket)
 

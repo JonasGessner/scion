@@ -34,7 +34,6 @@ import (
 	"github.com/scionproto/scion/go/lib/fatal"
 	"github.com/scionproto/scion/go/lib/log"
 	"github.com/scionproto/scion/go/lib/metrics"
-	"github.com/scionproto/scion/go/lib/prom"
 	"github.com/scionproto/scion/go/lib/serrors"
 	"github.com/scionproto/scion/go/pkg/command"
 )
@@ -141,18 +140,18 @@ func (a *Application) executeCommand(shortName string) error {
 
 	// Load launcher configurations from the same config file as the custom
 	// application configuration.
-	a.config.SetConfigType("toml")
-	a.config.SetConfigFile(a.config.GetString(cfgConfigFile))
-	if err := a.config.ReadInConfig(); err != nil {
-		return serrors.WrapStr("loading generic server config from file", err,
-			"file", a.config.GetString(cfgConfigFile))
-	}
+	// a.config.SetConfigType("toml")
+	// a.config.SetConfigFile(a.config.GetString(cfgConfigFile))
+	// if err := a.config.ReadInConfig(); err != nil {
+	// 	return serrors.WrapStr("loading generic server config from file", err,
+	// 		"file", a.config.GetString(cfgConfigFile))
+	// }
 
-	if err := libconfig.LoadFile(a.config.GetString(cfgConfigFile), a.TOMLConfig); err != nil {
-		return serrors.WrapStr("loading config from file", err,
-			"file", a.config.GetString(cfgConfigFile))
-	}
-	a.TOMLConfig.InitDefaults()
+	// if err := libconfig.LoadFile(a.config.GetString(cfgConfigFile), a.TOMLConfig); err != nil {
+	// 	return serrors.WrapStr("loading config from file", err,
+	// 		"file", a.config.GetString(cfgConfigFile))
+	// }
+	// a.TOMLConfig.InitDefaults()
 
 	logEntriesTotal := metrics.NewPromCounterFrom(
 		prometheus.CounterOpts{
@@ -177,10 +176,10 @@ func (a *Application) executeCommand(shortName string) error {
 	defer env.LogAppStopped(shortName, a.config.GetString(cfgGeneralID))
 	defer log.HandlePanic()
 
-	prom.ExportElementID(a.config.GetString(cfgGeneralID))
-	if err := a.TOMLConfig.Validate(); err != nil {
-		return serrors.WrapStr("validate config", err)
-	}
+	// prom.ExportElementID(a.config.GetString(cfgGeneralID))
+	// if err := a.TOMLConfig.Validate(); err != nil {
+	// 	return serrors.WrapStr("validate config", err)
+	// }
 
 	if a.Main == nil {
 		return nil
