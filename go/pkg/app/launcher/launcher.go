@@ -106,10 +106,10 @@ func (a *Application) run() error {
 	a.config.SetDefault(cfgLogConsoleFormat, "human")
 	a.config.SetDefault(cfgLogConsoleStacktraceLevel, log.DefaultStacktraceLevel)
 	a.config.SetDefault(cfgGeneralID, executable)
-	// The configuration file location is specified through command-line flags.
-	// Once the comand-line flags are parsed, we register the location of the
-	// config file with the viper config.
-	a.config.BindPFlag(cfgConfigFile, cmd.Flags().Lookup(cfgConfigFile))
+	// // The configuration file location is specified through command-line flags.
+	// // Once the comand-line flags are parsed, we register the location of the
+	// // config file with the viper config.
+	// a.config.BindPFlag(cfgConfigFile, cmd.Flags().Lookup(cfgConfigFile))
 
 	// All servers accept SIGTERM to perform clean shutdown (for example, this
 	// is used behind the scenes by docker stop to cleanly shut down a container).
@@ -151,7 +151,7 @@ func (a *Application) executeCommand(shortName string) error {
 	// 	return serrors.WrapStr("loading config from file", err,
 	// 		"file", a.config.GetString(cfgConfigFile))
 	// }
-	// a.TOMLConfig.InitDefaults()
+	a.TOMLConfig.InitDefaults()
 
 	logEntriesTotal := metrics.NewPromCounterFrom(
 		prometheus.CounterOpts{
@@ -242,7 +242,7 @@ func newCommandTemplate(executable string, shortName string, config config.Sampl
 		),
 		command.NewVersion(cmd),
 	)
-	cmd.Flags().String(cfgConfigFile, "", "Configuration file (required)")
-	cmd.MarkFlagRequired(cfgConfigFile)
+	// cmd.Flags().String(cfgConfigFile, "", "Configuration file (required)")
+	// cmd.MarkFlagRequired(cfgConfigFile)
 	return cmd
 }
