@@ -57,7 +57,7 @@ func (d *Dispatcher) ListenAndServe() error {
 			Listener:   dispServerConn,
 			DispServer: dispServer,
 		}
-		errChan <- dispServer.Serve()
+		errChan <- dispServer.Serve() // Jonas: Underlay stuff happens in here
 	}()
 
 	return <-errChan

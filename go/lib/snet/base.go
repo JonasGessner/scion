@@ -36,6 +36,10 @@ type scionConnBase struct {
 	net string
 }
 
+func (c *scionConnBase) LocalScionAddr() *UDPAddr {
+	return &UDPAddr{IA: c.scionNet.LocalIA, Host: c.listen}
+}
+
 func (c *scionConnBase) LocalAddr() net.Addr {
 	return c.listen
 }
