@@ -53,7 +53,7 @@ func (c *scionConnWriter) WriteTo(b []byte, raddr net.Addr) (int, error) {
 		path    spath.Path
 		nextHop *net.UDPAddr
 	)
-	fmt.Printf("Write to %s\n", raddr);
+	
 	switch a := raddr.(type) {
 	case nil:
 		return 0, serrors.New("Missing remote address")
