@@ -16,6 +16,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -131,7 +132,6 @@ func (pcf PacketConnFactory) New() (net.PacketConn, error) {
 
 type RoutingTableFactory struct {
 	RoutePublisherFactory routemgr.PublisherFactory
-	Source                net.IP
 }
 
 func (rtf RoutingTableFactory) New(
@@ -211,8 +211,10 @@ type Gateway struct {
 
 	// InternalDevice is the tunnel interface from which packets are read.
 	InternalDevice io.ReadWriteCloser
-	// RouteSource is the source for routes added to the Linux routing table.
-	RouteSource net.IP
+	// RouteSourceIPv4 is the source hint for IPv4 routes added to the Linux routing table.
+	RouteSourceIPv4 net.IP
+	// RouteSourceIPv6 is the source hint for IPv6 routes added to the Linux routing table.
+	RouteSourceIPv6 net.IP
 
 	// RoutePublisherFactory allows to publish routes from the gatyeway.
 	// If nil, no routes will be published.
@@ -267,9 +269,12 @@ func (g *Gateway) Run() error {
 	revocationHandler := sciond.RevHandler{Connector: g.Daemon}
 
 	var pathsMonitored, sessionPathsAvailable metrics.Gauge
+	var probesSent, probesReceived metrics.Counter
 	if g.Metrics != nil {
 		pathsMonitored = metrics.NewPromGauge(g.Metrics.PathsMonitored)
 		sessionPathsAvailable = metrics.NewPromGauge(g.Metrics.SessionPathsAvailable)
+		probesSent = metrics.NewPromCounter(g.Metrics.PathProbesSent)
+		probesReceived = metrics.NewPromCounter(g.Metrics.PathProbesReceived)
 	}
 	revStore := &pathhealth.MemoryRevocationStore{
 		Logger: g.Logger,
@@ -288,6 +293,8 @@ func (g *Gateway) Run() error {
 				},
 				Logger:         g.Logger,
 				PathsMonitored: pathsMonitored,
+				ProbesSent:     probesSent,
+				ProbesReceived: probesReceived,
 			},
 			Logger:          g.Logger,
 			RevocationStore: revStore,
@@ -602,7 +609,6 @@ func (g *Gateway) Run() error {
 		RoutingTableSwapper:  routingTable,
 		RoutingTableFactory: RoutingTableFactory{
 			RoutePublisherFactory: g.RoutePublisherFactory,
-			Source:                g.RouteSource,
 		},
 		EngineFactory: &control.DefaultEngineFactory{
 			PathMonitor: pathMonitor,
@@ -620,7 +626,8 @@ func (g *Gateway) Run() error {
 			Logger: g.Logger,
 		},
 		RoutePublisherFactory: g.RoutePublisherFactory,
-		RouteSource:           g.RouteSource,
+		RouteSourceIPv4:       g.RouteSourceIPv4,
+		RouteSourceIPv6:       g.RouteSourceIPv6,
 		Logger:                g.Logger,
 	}
 	go func() {
@@ -640,6 +647,7 @@ func (g *Gateway) Run() error {
 	g.HTTPEndpoints["diagnostics/prefixwatcher"] = func(w http.ResponseWriter, _ *http.Request) {
 		remoteMonitor.DiagnosticsWrite(w)
 	}
+	g.HTTPEndpoints["diagnostics/sgrp"] = g.diagnosticsSGRP(configPublisher)
 	var fwMetrics dataplane.IPForwarderMetrics
 	if g.Metrics != nil {
 		fwMetrics.IPPktBytesLocalRecv = metrics.NewPromCounter(
@@ -677,6 +685,34 @@ func (g *Gateway) Run() error {
 		return serrors.WrapStr("registering HTTP pages", err)
 	}
 	select {}
+}
+
+func (g *Gateway) diagnosticsSGRP(pub *control.ConfigPublisher) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var d struct {
+			Advertise struct {
+				Static []string `json:"static"`
+			} `json:"advertise"`
+			Learned struct {
+				Dynamic []string `json:"dynamic"`
+			} `json:"learned"`
+		}
+		// Avoid null in json output.
+		d.Advertise.Static = []string{}
+		d.Learned.Dynamic = []string{}
+
+		for _, s := range routing.StaticAdvertised(*pub.RoutingPolicy()) {
+			d.Advertise.Static = append(d.Advertise.Static, s.String())
+		}
+		if p, ok := g.RoutePublisherFactory.(interface{ Diagnostics() routemgr.Diagnostics }); ok {
+			for _, r := range p.Diagnostics().Routes {
+				d.Learned.Dynamic = append(d.Learned.Dynamic, r.Prefix.String())
+			}
+		}
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "    ")
+		enc.Encode(d)
+	}
 }
 
 func PathUpdateInterval() time.Duration {

@@ -16,7 +16,6 @@ package certs
 
 import (
 	"context"
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/tls"
@@ -47,11 +46,11 @@ import (
 	"github.com/scionproto/scion/go/lib/sock/reliable"
 	"github.com/scionproto/scion/go/lib/svc"
 	"github.com/scionproto/scion/go/pkg/app/feature"
+	"github.com/scionproto/scion/go/pkg/ca/renewal"
 	"github.com/scionproto/scion/go/pkg/command"
 	"github.com/scionproto/scion/go/pkg/grpc"
 	cppb "github.com/scionproto/scion/go/pkg/proto/control_plane"
 	"github.com/scionproto/scion/go/pkg/trust"
-	"github.com/scionproto/scion/go/pkg/trust/renewal"
 )
 
 type subjectVars struct {
@@ -289,10 +288,10 @@ func loadChain(trc cppki.SignedTRC, file string) ([]*x509.Certificate, addr.IA, 
 			"verification of transport cert failed with provided TRC", err)
 	}
 	ia, err := cppki.ExtractIA(chain[0].Issuer)
-	if err != nil || ia == nil {
+	if err != nil {
 		panic("chain is already validated")
 	}
-	return chain, *ia, nil
+	return chain, ia, nil
 }
 
 func createSigner(srcIA addr.IA, trc cppki.SignedTRC, chain []*x509.Certificate,
@@ -302,10 +301,13 @@ func createSigner(srcIA addr.IA, trc cppki.SignedTRC, chain []*x509.Certificate,
 	if err != nil {
 		return trust.Signer{}, err
 	}
+	algo, err := signed.SelectSignatureAlgorithm(key.Public())
+	if err != nil {
+		return trust.Signer{}, err
+	}
 	signer := trust.Signer{
 		PrivateKey:   key,
-		Algorithm:    signed.ECDSAWithSHA512,
-		Hash:         crypto.SHA512,
+		Algorithm:    algo,
 		IA:           srcIA,
 		TRCID:        trc.TRC.ID,
 		SubjectKeyID: chain[0].SubjectKeyId,
@@ -321,7 +323,7 @@ func createSigner(srcIA addr.IA, trc cppki.SignedTRC, chain []*x509.Certificate,
 func renew(ctx context.Context, csr []byte, dstIA addr.IA, signer trust.Signer,
 	dialer grpc.Dialer) ([]*x509.Certificate, error) {
 
-	req, err := renewal.NewChainRenewalRequest(ctx, csr, signer)
+	req, err := renewal.NewLegacyChainRenewalRequest(ctx, csr, signer)
 	if err != nil {
 		return nil, err
 	}
@@ -369,8 +371,7 @@ func csrTemplate(chain []*x509.Certificate, tmpl string) (*x509.CertificateReque
 		s := chain[0].Subject
 		s.ExtraNames = s.Names
 		return &x509.CertificateRequest{
-			Subject:            s,
-			SignatureAlgorithm: x509.ECDSAWithSHA512,
+			Subject: s,
 		}, nil
 	}
 	vars, err := readVars(tmpl)
@@ -404,8 +405,7 @@ func csrTemplate(chain []*x509.Certificate, tmpl string) (*x509.CertificateReque
 		}
 	}
 	return &x509.CertificateRequest{
-		Subject:            s,
-		SignatureAlgorithm: x509.ECDSAWithSHA512,
+		Subject: s,
 	}, nil
 }
 
@@ -519,7 +519,7 @@ func findLocalAddr(ctx context.Context, sds sciond.Service) (*snet.UDPAddr, erro
 
 func outFileFromSubject(renewed []*x509.Certificate, dir string) string {
 	subject, err := cppki.ExtractIA(renewed[0].Subject)
-	if err != nil || subject == nil {
+	if err != nil {
 		panic("chain is already validated")
 	}
 	return filepath.Join(dir, fmt.Sprintf("ISD%d-AS%s.%x.pem", subject.I, subject.A.FileFmt(),

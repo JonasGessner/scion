@@ -69,8 +69,8 @@ func (d *DRKeyServer) DRKeyLvl1(ctx context.Context,
 	}
 
 	logger.Debug("[DRKey gRPC server] Received Lvl1 request",
-		"lvl1_req", parsedReq, "peer", peer.Addr.String(), "IA from cert", (*dstIA).String())
-	lvl1Key, err := d.Store.DeriveLvl1(*dstIA, parsedReq.ValTime)
+		"lvl1_req", parsedReq, "peer", peer.Addr.String(), "IA from cert", dstIA.String())
+	lvl1Key, err := d.Store.DeriveLvl1(dstIA, parsedReq.ValTime)
 	if err != nil {
 		logger.Error("Error deriving level 1 key", "err", err)
 		return nil, err

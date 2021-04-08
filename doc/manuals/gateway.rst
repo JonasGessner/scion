@@ -258,6 +258,28 @@ Monitored paths
 
 **Labels**: ``remote_isd_as``
 
+Path probes sent
+^^^^^^^^^^^^^^^^
+
+**Name**: ``gateway_path_probes_sent``
+
+**Type**: Counter
+
+**Description**: Number of path probes being sent.
+
+**Labels**: ``remote_isd_as``
+
+Path probe replies received
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**Name**: ``gateway_path_probes_received``
+
+**Type**: Counter
+
+**Description**: Number of replies to the path probes being received.
+
+**Labels**: ``remote_isd_as``
+
 Available session paths
 ^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -341,7 +363,7 @@ configuration setting.
 The HTTP API does not support user authentication or HTTPS. Applications will want to firewall
 this port or bind to a loopback address.
 
-In addition to the :ref:`common HTTP API <common-http-api>`, the ``daemon`` supports the following API calls:
+In addition to the :ref:`common HTTP API <common-http-api>`, the ``gateway`` supports the following API calls:
 
 - ``/status`` (**EXPERIMENTAL**)
 

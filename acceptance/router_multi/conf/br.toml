@@ -1,0 +1,7 @@
+[general]
+  id = "brA"
+  config_dir = "/share/conf"
+
+[log]
+  [log.console]
+    level = "debug"

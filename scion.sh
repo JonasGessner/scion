@@ -2,8 +2,6 @@
 
 export PYTHONPATH=.
 
-EXTRA_NOSE_ARGS="-w python/ --with-xunit --xunit-file=logs/nosetests.xml"
-
 # BEGIN subcommand functions
 
 run_silently() {
@@ -53,17 +51,10 @@ cmd_topology() {
     fi
 }
 
-build_binaries() {
-    rm bin/*
-    bazel build //:scion //:scion-ci
-    tar -kxf bazel-bin/scion.tar -C bin
-    tar -kxf bazel-bin/scion-ci.tar -C bin
-}
-
 cmd_run() {
     if [ "$1" != "nobuild" ]; then
         echo "Compiling..."
-        build_binaries || exit 1
+        make -s build || exit 1
         if is_docker_be; then
             echo "Build perapp images"
             bazel run -c opt //docker:prod
@@ -229,40 +220,18 @@ is_supervisor() {
 }
 
 cmd_test(){
-    local ret=0
-    case "$1" in
-        py) shift; py_test "$@"; ret=$((ret+$?));;
-        go) shift; bazel_test ; ret=$((ret+$?));;
-        *) py_test; ret=$((ret+$?)); bazel_test; ret=$((ret+$?));;
-    esac
-    return $ret
-}
-
-py_test() {
-    mkdir -p logs
-    python3 -m unittest discover
-    nosetests3 ${EXTRA_NOSE_ARGS} "$@"
-}
-
-bazel_test() {
-    bazel test ... --test_tag_filters=unit --build_tests_only --print_relative_test_log_paths
+    echo "deprecated, use"
+    echo "make test"
+    echo "instead"
+    exit 1
 }
 
 cmd_coverage(){
     set -e
     case "$1" in
-        py) shift; py_cover "$@";;
         go) shift; go_cover "$@";;
-        *) py_cover;
-           echo "============================================="
-           go_cover;;
+        *) go_cover;;
     esac
-}
-
-py_cover() {
-    nosetests3 ${EXTRA_NOSE_ARGS} --with-cov --cov-report html "$@"
-    echo
-    echo "Python coverage report here: file://$PWD/python/htmlcov/index.html"
 }
 
 go_cover() {
@@ -286,7 +255,7 @@ go_lint() {
     # Find go files to lint, excluding generated code. For linelen and misspell.
     find go acceptance -type f -iname '*.go' \
       -a '!' -ipath '*.pb.go' \
-      -a '!' -ipath 'go/proto/structs.gen.go' \
+      -a '!' -ipath '*.gen.go' \
       -a '!' -ipath 'go/proto/*.capnp.go' \
       -a '!' -ipath '*mock_*' > $TMPDIR/gofiles.list
     lint_step "Building lint tools"
@@ -384,7 +353,7 @@ cmd_traces() {
         -e BADGER_DIRECTORY_KEY=/badger/key \
         -v "$trace_dir:/badger" \
         -p "$port":16686 \
-        jaegertracing/all-in-one:1.16.0
+        jaegertracing/all-in-one:1.22.0
     sleep 3
     x-www-browser "http://localhost:$port"
 }

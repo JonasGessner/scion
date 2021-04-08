@@ -31,10 +31,11 @@ import (
 	sqlitepathdb "github.com/scionproto/scion/go/lib/pathdb/sqlite"
 	"github.com/scionproto/scion/go/lib/revcache"
 	"github.com/scionproto/scion/go/lib/revcache/memrevcache"
+	"github.com/scionproto/scion/go/pkg/ca/renewal"
+	sqliterenewaldb "github.com/scionproto/scion/go/pkg/ca/renewal/sqlite"
+	truststorage "github.com/scionproto/scion/go/pkg/storage/trust"
+	sqlitetrustdb "github.com/scionproto/scion/go/pkg/storage/trust/sqlite"
 	"github.com/scionproto/scion/go/pkg/trust"
-	"github.com/scionproto/scion/go/pkg/trust/renewal"
-	sqliterenewaldb "github.com/scionproto/scion/go/pkg/trust/renewal/sqlite"
-	sqlitetrustdb "github.com/scionproto/scion/go/pkg/trust/sqlite"
 )
 
 // Backend indicates the database backend type.
@@ -73,6 +74,14 @@ var (
 func SetID(cfg DBConfig, id string) *DBConfig {
 	cfg.Connection = fmt.Sprintf(cfg.Connection, id)
 	return &cfg
+}
+
+// TrustDB extends the trust.DB interface with methods used outside of the trust
+// package.
+type TrustDB interface {
+	io.Closer
+	trust.DB
+	truststorage.TrustAPI
 }
 
 var _ (config.Config) = (*DBConfig)(nil)
@@ -154,7 +163,7 @@ func NewRevocationStorage() revcache.RevCache {
 	return memrevcache.New()
 }
 
-func NewTrustStorage(c DBConfig) (trust.DB, error) {
+func NewTrustStorage(c DBConfig) (TrustDB, error) {
 	log.Info("Connecting TrustDB", "backend", BackendSqlite, "connection", c.Connection)
 	db, err := sqlitetrustdb.New(c.Connection)
 	if err != nil {

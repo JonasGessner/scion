@@ -16,7 +16,6 @@ package trust_test
 
 import (
 	"context"
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/pem"
@@ -31,8 +30,8 @@ import (
 	"github.com/scionproto/scion/go/lib/scrypto/cppki"
 	"github.com/scionproto/scion/go/lib/scrypto/signed"
 	"github.com/scionproto/scion/go/lib/xtest"
+	"github.com/scionproto/scion/go/pkg/storage/trust/sqlite"
 	"github.com/scionproto/scion/go/pkg/trust"
-	"github.com/scionproto/scion/go/pkg/trust/sqlite"
 )
 
 func BenchmarkConcurrent10(b *testing.B) {
@@ -146,6 +145,5 @@ func loadTrustSigner(b *testing.B, db trust.DB) trust.Signer {
 			Base:   1,
 			Serial: 1,
 		},
-		Hash: crypto.SHA512,
 	}
 }

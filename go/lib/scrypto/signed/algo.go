@@ -17,6 +17,7 @@ package signed
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"fmt"
 
 	"github.com/scionproto/scion/go/lib/serrors"
@@ -34,19 +35,19 @@ const (
 type SignatureAlgorithm int
 
 // SelectSignatureAlgorithm selects the signature algorithm based on the public
-// key algorithm and the message digest algorithm.
-func SelectSignatureAlgorithm(pub crypto.PublicKey, hash crypto.Hash) (SignatureAlgorithm, error) {
-	switch pub.(type) {
+// key algorithm.
+func SelectSignatureAlgorithm(pub crypto.PublicKey) (SignatureAlgorithm, error) {
+	switch p := pub.(type) {
 	case *ecdsa.PublicKey:
-		switch hash {
-		case crypto.SHA256:
+		switch p.Curve {
+		case elliptic.P256():
 			return ECDSAWithSHA256, nil
-		case crypto.SHA384:
+		case elliptic.P384():
 			return ECDSAWithSHA384, nil
-		case crypto.SHA512:
+		case elliptic.P521():
 			return ECDSAWithSHA512, nil
 		default:
-			return 0, serrors.New("ecdsa: unsupported hash algorithm", "algorithm", hash)
+			return 0, serrors.New("ecdsa: unsupported curve", "curve", p.Curve)
 		}
 	default:
 		return 0, serrors.New("unsupported public key algorithm", "type", fmt.Sprintf("%T", pub))
@@ -94,4 +95,8 @@ var signatureAlgorithmDetails = map[SignatureAlgorithm]struct {
 	ECDSAWithSHA256: {name: "ECDSA-SHA256", pubKeyAlgo: pkECDSA, hash: crypto.SHA256},
 	ECDSAWithSHA384: {name: "ECDSA-SHA384", pubKeyAlgo: pkECDSA, hash: crypto.SHA384},
 	ECDSAWithSHA512: {name: "ECDSA-SHA512", pubKeyAlgo: pkECDSA, hash: crypto.SHA512},
+}
+
+func (a SignatureAlgorithm) String() string {
+	return signatureAlgorithmDetails[a].name
 }

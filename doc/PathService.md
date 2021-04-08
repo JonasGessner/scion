@@ -1,5 +1,13 @@
 # Path Service
 
+​
+
+---
+⚠️  **NOTE** ⚠️<br/>
+Outdated contents! This document is kept for historical purpose.
+
+---
+
 The path service is implemented as part of the control server.
 
 ## Request Handlers

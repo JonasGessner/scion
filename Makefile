@@ -1,5 +1,5 @@
 
-.PHONY: all bazel clean gazelle gogen licenses mocks protobuf setcap antlr
+.PHONY: all bazel clean gazelle gogen licenses mocks protobuf antlr
 .NOTPARALLEL:
 
 GAZELLE_MODE?=fix
@@ -23,6 +23,9 @@ bazel:
 	tar -kxf bazel-bin/scion.tar -C bin
 	tar -kxf bazel-bin/scion-ci.tar -C bin
 
+test:
+	bazel test --config=unit --test_output=errors
+
 go_deps.bzl: go.mod
 	@tools/godeps.sh
 
@@ -35,14 +38,22 @@ protobuf:
 	cp -r bazel-bin/go/pkg/proto/*/go_default_library_/github.com/scionproto/scion/go/pkg/proto/* go/pkg/proto
 	chmod 0644 go/pkg/proto/*/*.pb.go
 
+oai-boilerplate: clean
+	bazel build //spec/...
+
+	rm -f go/pkg/cs/api/*.gen.go
+	cp -r bazel-bin/spec/go/pkg/cs/api/*.gen.go go/pkg/cs/api
+	chmod 0644 go/pkg/cs/api/*.gen.go
+
+	rm -f go/pkg/ca/api/*.gen.go
+	cp -r bazel-bin/spec/go/pkg/ca/api/*.gen.go go/pkg/ca/api
+	chmod 0644 go/pkg/ca/api/*.gen.go
+
 mocks:
 	tools/gomocks
 
 gazelle:
-	bazel run //:gazelle -- update -mode=$(GAZELLE_MODE) -go_naming_convention go_default_library -index=false -external=external -exclude go/vendor -exclude docker/_build $(GAZELLE_DIRS)
-
-setcap:
-	tools/setcap cap_net_admin,cap_net_raw+ep ./bin/braccept
+	bazel run //:gazelle -- update -mode=$(GAZELLE_MODE) -go_naming_convention go_default_library -exclude docker/_build $(GAZELLE_DIRS)
 
 licenses:
 	tools/licenses.sh

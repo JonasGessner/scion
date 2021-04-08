@@ -29,7 +29,7 @@ import (
 	"github.com/scionproto/scion/go/lib/scrypto/cppki"
 	"github.com/scionproto/scion/go/lib/tracing"
 	"github.com/scionproto/scion/go/lib/util"
-	trustmetrics "github.com/scionproto/scion/go/pkg/cs/trust/internal/metrics"
+	trustmetrics "github.com/scionproto/scion/go/pkg/cs/trust/metrics"
 	cppb "github.com/scionproto/scion/go/pkg/proto/control_plane"
 	"github.com/scionproto/scion/go/pkg/trust"
 )

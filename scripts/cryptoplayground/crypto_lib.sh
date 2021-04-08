@@ -79,26 +79,29 @@ in_docker() {
 # Config file creation
 ######################
 
-payload_conf() {
+PAYLOAD_CONF_SAMPLE=$(cat <<-END
 # LITERALINCLUDE payload_conf_sample START
-# {{.ISD}}               = 1
-# {{.Description}}       = "Test ISD"
-# {{.VotingQuorum}}      = 2
-# {{.CoreASes}}          = ["ff00:0:110", "ff00:0:111"]
-# {{.AuthoritativeASes}} = ["ff00:0:110", "ff00:0:111"]
-# {{.NotBefore}}         = 1593000000  # Seconds since UNIX Epoch
-# {{.Validity}}          = "365d"
-# {{.CertFiles}} = [
-#     "bern/sensitive-voting.crt",
-#     "bern/regular-voting.crt",
-#     "bern/cp-root.crt",
-#     "geneva/sensitive-voting.crt",
-#     "geneva/regular-voting.crt",
-#     "zürich/sensitive-voting.crt",
-#     "zürich/regular-voting.crt",
-# ]
+{{.ISD}}               = 1
+{{.Description}}       = "Test ISD"
+{{.VotingQuorum}}      = 2
+{{.CoreASes}}          = ["ff00:0:110", "ff00:0:111"]
+{{.AuthoritativeASes}} = ["ff00:0:110", "ff00:0:111"]
+{{.NotBefore}}         = 1593000000  # Seconds since UNIX Epoch
+{{.Validity}}          = "365d"
+{{.CertFiles}} = [
+    "bern/sensitive-voting.crt",
+    "bern/regular-voting.crt",
+    "bern/cp-root.crt",
+    "geneva/sensitive-voting.crt",
+    "geneva/regular-voting.crt",
+    "zürich/sensitive-voting.crt",
+    "zürich/regular-voting.crt",
+]
 # LITERALINCLUDE payload_conf_sample END
+END
+)
 
+payload_conf() {
 # LITERALINCLUDE payload_conf START
 cat << EOF > ISD-B1-S1.toml
 isd                = {{.ISD}}
@@ -179,12 +182,12 @@ sensitive_conf() {
 # LITERALINCLUDE sensitive_conf START
 cat << EOF > sensitive-voting.cnf
 openssl_conf    = openssl_init
-x509_extensions = req_ext
+x509_extensions = x509_ext
 
 [common_name]
 name = {{.ShortOrg}} High Security Voting Certificate
 
-[req_ext]
+[x509_ext]
 subjectKeyIdentifier = hash
 extendedKeyUsage     = 1.3.6.1.4.1.55324.1.3.1, 1.3.6.1.5.5.7.3.8
 
@@ -200,12 +203,12 @@ regular_conf() {
 # LITERALINCLUDE regular_conf START
 cat << EOF > regular-voting.cnf
 openssl_conf    = openssl_init
-x509_extensions = req_ext
+x509_extensions = x509_ext
 
 [common_name]
 name = {{.ShortOrg}} Regular Voting Certificate
 
-[req_ext]
+[x509_ext]
 subjectKeyIdentifier = hash
 extendedKeyUsage     = 1.3.6.1.4.1.55324.1.3.2, 1.3.6.1.5.5.7.3.8
 
@@ -221,12 +224,12 @@ root_conf() {
 # LITERALINCLUDE root_conf START
 cat << EOF > cp-root.cnf
 openssl_conf    = openssl_init
-x509_extensions = req_ext
+x509_extensions = x509_ext
 
 [common_name]
 name = {{.ShortOrg}} High Security Root Certificate
 
-[req_ext]
+[x509_ext]
 basicConstraints     = critical, CA:TRUE, pathlen:1
 keyUsage             = critical, keyCertSign
 subjectKeyIdentifier = hash
@@ -244,16 +247,22 @@ ca_conf() {
 # LITERALINCLUDE ca_conf START
 cat << EOF > cp-ca.cnf
 openssl_conf    = openssl_init
-x509_extensions = req_ext
+x509_extensions = x509_ext
+req_extensions  = req_ext
 
 [common_name]
 name = {{.ShortOrg}} Secure CA Certificate
+
+[x509_ext]
+basicConstraints       = critical, CA:TRUE, pathlen:0
+keyUsage               = critical, keyCertSign
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid
 
 [req_ext]
 basicConstraints       = critical, CA:TRUE, pathlen:0
 keyUsage               = critical, keyCertSign
 subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid
 
 [ca_defaults]
 default_days = 7
@@ -267,15 +276,21 @@ as_conf() {
 # LITERALINCLUDE as_conf START
 cat << EOF > cp-as.cnf
 openssl_conf    = openssl_init
-x509_extensions = req_ext
+x509_extensions = x509_ext
+req_extensions  = req_ext
 
 [common_name]
 name = {{.ShortOrg}} AS Certificate
 
-[req_ext]
+[x509_ext]
 keyUsage               = critical, digitalSignature
 subjectKeyIdentifier   = hash
 authorityKeyIdentifier = keyid
+extendedKeyUsage       = 1.3.6.1.5.5.7.3.1, 1.3.6.1.5.5.7.3.2, 1.3.6.1.5.5.7.3.8
+
+[req_ext]
+keyUsage               = critical, digitalSignature
+subjectKeyIdentifier   = hash
 extendedKeyUsage       = 1.3.6.1.5.5.7.3.1, 1.3.6.1.5.5.7.3.2, 1.3.6.1.5.5.7.3.8
 
 [ca_defaults]

@@ -61,12 +61,13 @@ import (
 	"github.com/scionproto/scion/go/lib/sock/reliable"
 	"github.com/scionproto/scion/go/lib/topology"
 	"github.com/scionproto/scion/go/pkg/app/launcher"
+	"github.com/scionproto/scion/go/pkg/ca/renewal"
+	renewalgrpc "github.com/scionproto/scion/go/pkg/ca/renewal/grpc"
 	"github.com/scionproto/scion/go/pkg/command"
 	"github.com/scionproto/scion/go/pkg/cs"
 	"github.com/scionproto/scion/go/pkg/cs/api"
 	"github.com/scionproto/scion/go/pkg/cs/drkey"
 	drkeygrpc "github.com/scionproto/scion/go/pkg/cs/drkey/grpc"
-	cstrust "github.com/scionproto/scion/go/pkg/cs/trust"
 	cstrustgrpc "github.com/scionproto/scion/go/pkg/cs/trust/grpc"
 	cstrustmetrics "github.com/scionproto/scion/go/pkg/cs/trust/metrics"
 	"github.com/scionproto/scion/go/pkg/discovery"
@@ -75,11 +76,11 @@ import (
 	dpb "github.com/scionproto/scion/go/pkg/proto/discovery"
 	"github.com/scionproto/scion/go/pkg/service"
 	"github.com/scionproto/scion/go/pkg/storage"
+	truststoragemetrics "github.com/scionproto/scion/go/pkg/storage/trust/metrics"
 	"github.com/scionproto/scion/go/pkg/trust"
 	"github.com/scionproto/scion/go/pkg/trust/compat"
 	trustgrpc "github.com/scionproto/scion/go/pkg/trust/grpc"
 	trustmetrics "github.com/scionproto/scion/go/pkg/trust/metrics"
-	"github.com/scionproto/scion/go/pkg/trust/renewal"
 )
 
 var globalCfg config.Config
@@ -148,8 +149,11 @@ func realMain() error {
 	if err != nil {
 		return serrors.WrapStr("initializing trust storage", err)
 	}
-	trustDB = trustmetrics.WrapDB(string(storage.BackendSqlite), trustDB)
 	defer trustDB.Close()
+	trustDB = truststoragemetrics.WrapDB(trustDB, truststoragemetrics.Config{
+		Driver:       string(storage.BackendSqlite),
+		QueriesTotal: libmetrics.NewPromCounter(metrics.TrustDBQueriesTotal),
+	})
 	if err := cs.LoadTrustMaterial(globalCfg.General.ConfigDir, trustDB, log.Root()); err != nil {
 		return err
 	}
@@ -286,7 +290,7 @@ func realMain() error {
 		return serrors.WrapStr("initializing AS signer", err)
 	}
 
-	var chainBuilder cstrust.ChainBuilder
+	var chainBuilder renewal.ChainBuilder
 	if topo.CA() {
 		renewalDB, err := storage.NewRenewalStorage(globalCfg.RenewalDB)
 		if err != nil {
@@ -302,8 +306,10 @@ func realMain() error {
 			globalCfg.CA.MaxASValidity.Duration,
 			globalCfg.General.ConfigDir,
 		)
-		renewalServer := &cstrustgrpc.RenewalServer{
-			Verifier:     cstrustgrpc.RenewalRequestVerifierFunc(renewal.VerifyChainRenewalRequest),
+		renewalServer := &renewalgrpc.RenewalServer{
+			Verifier: renewal.RequestVerifier{
+				TRCFetcher: trustDB,
+			},
 			ChainBuilder: chainBuilder,
 			DB:           renewalDB,
 			IA:           topo.IA(),
@@ -485,12 +491,14 @@ func realMain() error {
 			AllowedOrigins: []string{"*"},
 		}))
 		server := api.Server{
+			Segments: pathDB,
 			CA:       chainBuilder,
 			Config:   service.NewConfigHandler(globalCfg),
 			Info:     service.NewInfoHandler(),
 			LogLevel: log.ConsoleLevel.ServeHTTP,
 			Signer:   signer,
 			Topology: itopo.TopologyHandler,
+			TrustDB:  trustDB,
 		}
 		log.Info("Exposing API", "addr", globalCfg.API.Addr)
 		h := api.HandlerFromMux(&server, r)

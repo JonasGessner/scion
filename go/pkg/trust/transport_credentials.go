@@ -98,7 +98,7 @@ func verifyConnection(cs tls.ConnectionState, serverName string) error {
 	if err != nil {
 		return serrors.WrapStr("extracting IA from peer cert", err)
 	}
-	if !serverIA.Equal(*certIA) {
+	if !serverIA.Equal(certIA) {
 		return serrors.New("extracted IA from cert and server IA do not match",
 			"peer IA", certIA, "server IA", serverIA)
 	}
