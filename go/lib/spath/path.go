@@ -21,7 +21,6 @@ import (
 	"hash"
 	"math"
 	"math/big"
-	"reflect"
 	"time"
 
 	"github.com/scionproto/scion/go/lib/addr"
@@ -145,21 +144,4 @@ func (path *Path) String() string {
 		p = "not supported"
 	}
 	return fmt.Sprintf("{type: %s, p: %s}", path.Type, p)
-}
-
-func (path Path) CompareHops(other Path) (bool, error) {
-	if path.Type != other.Type { return false, nil }
-	if path.Type != scion.PathType { return false, nil }
-
-	var sp1 scion.Decoded
-	if err := sp1.DecodeFromBytes(path.Raw); err != nil {
-		return false, err
-	}
-
-	var sp2 scion.Decoded
-	if err := sp2.DecodeFromBytes(other.Raw); err != nil {
-		return false, err
-	}
-
-	return reflect.DeepEqual(sp1, sp2), nil
 }
