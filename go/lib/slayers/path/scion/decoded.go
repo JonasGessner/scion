@@ -94,6 +94,23 @@ func (s *Decoded) SerializeTo(b []byte) error {
 	return nil
 }
 
+// SerializeTo writes the path to a slice. The slice must be big enough to hold the entire data,
+// otherwise an error is returned.
+func (s *Decoded) SerializeHopsTo(b []byte) error {
+	if len(b) < int(s.NumHops)*path.HopLen {
+		return serrors.New("buffer too small to serialize path.", "expected", int(s.NumHops)*path.HopLen,
+			"actual", len(b))
+	}
+	offset := 0
+	for _, hop := range s.HopFields {
+		if err := hop.SerializeTo(b[offset : offset+path.HopLen]); err != nil {
+			return err
+		}
+		offset += path.HopLen
+	}
+	return nil
+}
+
 // Reverse reverses a SCION path.
 func (s *Decoded) Reverse() (path.Path, error) {
 	if s.NumINF == 0 {
