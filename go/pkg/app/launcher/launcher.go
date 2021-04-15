@@ -232,7 +232,8 @@ func newCommandTemplate(executable string, shortName string, config config.Sampl
 		Example:       fmt.Sprintf("  %s --config %s", executable, "config.toml"),
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		Args:          cobra.NoArgs,
+		Args:          cobra.ArbitraryArgs,
+		DisableFlagParsing: true,
 	}
 	cmd.AddCommand(
 		command.NewCompletion(cmd),
