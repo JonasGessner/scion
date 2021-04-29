@@ -16,6 +16,7 @@ package segfetcher
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"net"
 	"time"
@@ -69,6 +70,7 @@ func (f *Fetcher) Fetch(ctx context.Context, reqs Requests, refresh bool) (Segme
 	// Load local and cached segments from DB
 	loadedSegs, fetchReqs, err := f.Resolver.Resolve(ctx, reqs, refresh)
 	if err != nil {
+		fmt.Printf("f.Resolver.Resolve returned error %v\n", err)
 		return Segments{}, serrors.Wrap(errDB, err)
 	}
 	if len(fetchReqs) == 0 {
@@ -77,6 +79,7 @@ func (f *Fetcher) Fetch(ctx context.Context, reqs Requests, refresh bool) (Segme
 	// Forward and cache any requests that were not local / cached
 	fetchedSegs, err := f.Request(ctx, fetchReqs)
 	if err != nil {
+		fmt.Printf("Fetcher.Request in Fetcher.Fetch returned error %v\n", err)
 		err = serrors.Wrap(errFetch, err)
 	}
 	return append(loadedSegs, fetchedSegs...), err
@@ -101,12 +104,14 @@ func (f *Fetcher) waitOnProcessed(ctx context.Context,
 		labels := metrics.RequestLabels{Result: metrics.ErrNotClassified}
 		if reply.Err != nil {
 			if serrors.IsTimeout(reply.Err) {
+				fmt.Printf("Path fetch timeout\n")
 				labels.Result = metrics.ErrTimeout
 			}
 			f.Metrics.SegRequests(labels).Inc()
 			continue
 		}
 		if len(reply.Segments) == 0 {
+			fmt.Printf("No segments in reply\n")
 			f.Metrics.SegRequests(labels.WithResult(metrics.OkSuccess)).Inc()
 			continue
 		}
@@ -114,10 +119,12 @@ func (f *Fetcher) waitOnProcessed(ctx context.Context,
 		defer f.Metrics.UpdateRevocation(r.Stats().RevStored(),
 			r.Stats().RevDBErrs(), r.Stats().RevVerifyErrors())
 		if err := r.Err(); err != nil {
+			fmt.Printf("Error processign reply %v\n", err)
 			f.Metrics.SegRequests(labels.WithResult(metrics.ErrProcess)).Inc()
 			return segs, serrors.WrapStr("processing reply", err)
 		}
 		if len(r.VerificationErrors()) > 0 {
+			fmt.Printf("Error during verification of segments/revocations\n")
 			log.FromCtx(ctx).Info("Error during verification of segments/revocations",
 				"errors", r.VerificationErrors().ToError())
 		}
@@ -125,6 +132,7 @@ func (f *Fetcher) waitOnProcessed(ctx context.Context,
 		nextQuery := f.nextQuery(segs)
 		_, err := f.PathDB.InsertNextQuery(ctx, reply.Req.Src, reply.Req.Dst, nil, nextQuery)
 		if err != nil {
+			fmt.Printf("f.PathDB.InsertNextQuery returned error %v\n", err)
 			logger.Info("NextQuery insertion failed", "err", err)
 		}
 		f.Metrics.SegRequests(labels.WithResult(metrics.OkSuccess)).Inc()

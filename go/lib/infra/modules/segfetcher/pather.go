@@ -53,7 +53,7 @@ type Pather struct {
 // containing an empty path is returned.
 func (p *Pather) GetPaths(ctx context.Context, dst addr.IA,
 	refresh bool) ([]snet.Path, error) {
-
+	fmt.Println("Pather.GetPaths called")
 	logger := log.FromCtx(ctx)
 	if dst.I == 0 {
 		return nil, serrors.WithCtx(ErrBadDst, "dst", dst)
@@ -71,16 +71,19 @@ func (p *Pather) GetPaths(ctx context.Context, dst addr.IA,
 	}
 	reqs, err := p.Splitter.Split(ctx, dst)
 	if err != nil {
+		fmt.Printf("Pather.GetPaths split error %v\n", err)
 		return nil, err
 	}
 	segs, fetchErr := p.Fetcher.Fetch(ctx, reqs, refresh)
 	// Even if fetching failed, attempt to create paths.
 	if fetchErr != nil {
+		fmt.Printf("Pather.GetPaths fetch error %v\n", fetchErr)
 		logger.Debug("Fetching failed, attempting to build paths anyway", "err", err)
 	}
 	paths := p.buildAllPaths(src, dst, segs)
 	paths = p.filterRevoked(ctx, paths)
 	if len(paths) == 0 {
+		fmt.Printf("p.Fetcher.Fetch in Pather.GetPaths returned 0 paths")
 		if fetchErr != nil {
 			return nil, fetchErr
 		}
@@ -180,6 +183,7 @@ func (p *Pather) translatePaths(cPaths []combinator.Path) ([]snet.Path, error) {
 		paths = append(paths, sp)
 	}
 	if len(paths) == 0 {
+		fmt.Println("No paths after translation")
 		return nil, serrors.New("no paths after translation", "errs", errs.ToError())
 	}
 	return paths, nil

@@ -16,6 +16,7 @@ package sciond
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"time"
 
@@ -85,6 +86,7 @@ func (c grpcConn) Paths(ctx context.Context, dst, src addr.IA,
 		Refresh:          f.Refresh,
 	})
 	if err != nil {
+		fmt.Println("Sciond got path query error");
 		c.metrics.incPaths(err)
 		return nil, err
 	}

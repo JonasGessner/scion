@@ -87,6 +87,7 @@ func (s *DaemonServer) paths(ctx context.Context,
 	}()
 	paths, err := s.fetchPaths(ctx, &s.foregroundPathDedupe, srcIA, dstIA, req.Refresh)
 	if err != nil {
+		fmt.Printf("DaemonServer.fetchPaths returned error: %v\n", err)
 		log.FromCtx(ctx).Debug("Fetching paths", "err", err,
 			"src", srcIA, "dst", dstIA, "refresh", req.Refresh)
 		return nil, err
@@ -184,6 +185,7 @@ func (s *DaemonServer) backgroundPaths(origCtx context.Context, src, dst addr.IA
 		// the original context is large enough no need to spin a background fetch.
 		return
 	}
+	fmt.Println("Going background fetch (DaemonServer.backgroundPaths)")
 	ctx, cancelF := context.WithTimeout(context.Background(), backgroundTimeout)
 	defer cancelF()
 	var spanOpts []opentracing.StartSpanOption
