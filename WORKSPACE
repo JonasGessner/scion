@@ -7,9 +7,10 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive", "http_file"
 # linter rules
 http_archive(
     name = "apple_rules_lint",
-    sha256 = "ece669d52998c7a0df2c2380f37edbf4ed8ebb1a03587ed1781dfbececef9b3d",
+    sha256 = "8feab4b08a958b10cb2abb7f516652cd770b582b36af6477884b3bba1f2f0726",
+    strip_prefix = "apple_rules_lint-0.1.1",
     urls = [
-        "https://github.com/apple/apple_rules_lint/releases/download/0.1.0/apple_rules_lint-0.1.0.tar.gz",
+        "https://github.com/apple/apple_rules_lint/archive/0.1.1.zip",
     ],
 )
 
@@ -28,10 +29,10 @@ lint_setup({
 # Bazel rules for Golang
 http_archive(
     name = "io_bazel_rules_go",
-    sha256 = "6f111c57fd50baf5b8ee9d63024874dd2a014b069426156c55adbf6d3d22cb7b",
+    sha256 = "69de5c704a05ff37862f7e0f5534d4f479418afc21806c887db544a316f3cb6b",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.25.0/rules_go-v0.25.0.tar.gz",
-        "https://github.com/bazelbuild/rules_go/releases/download/v0.25.0/rules_go-v0.25.0.tar.gz",
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.27.0/rules_go-v0.27.0.tar.gz",
+        "https://github.com/bazelbuild/rules_go/releases/download/v0.27.0/rules_go-v0.27.0.tar.gz",
     ],
 )
 
@@ -41,16 +42,16 @@ go_rules_dependencies()
 
 go_register_toolchains(
     nogo = "@//:nogo",
-    version = "1.15.6",
+    version = "1.15.11",
 )
 
 # Gazelle
 http_archive(
     name = "bazel_gazelle",
-    sha256 = "b85f48fa105c4403326e9525ad2b2cc437babaa6e15a3fc0b1dbab0ab064bc7c",
+    sha256 = "62ca106be173579c0a167deb23358fdfe71ffa1e4cfdddf5582af26520f1c66f",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.22.2/bazel-gazelle-v0.22.2.tar.gz",
-        "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.22.2/bazel-gazelle-v0.22.2.tar.gz",
+        "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.23.0/bazel-gazelle-v0.23.0.tar.gz",
+        "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.23.0/bazel-gazelle-v0.23.0.tar.gz",
     ],
 )
 
@@ -70,9 +71,9 @@ gazelle_dependencies()
 # Python rules
 http_archive(
     name = "rules_python",
-    sha256 = "48f7e716f4098b85296ad93f5a133baf712968c13fbc2fdf3a6136158fe86eac",
-    strip_prefix = "rules_python-0.1.0",
-    url = "https://github.com/bazelbuild/rules_python/archive/0.1.0.tar.gz",
+    sha256 = "0d25ab1c7b18b3f48d1bff97bfa70c1625438b40c5f661946fb43eca4ba9d9dd",
+    strip_prefix = "rules_python-0.2.0",
+    url = "https://github.com/bazelbuild/rules_python/archive/0.2.0.tar.gz",
 )
 
 load("@rules_python//python:repositories.bzl", "py_repositories")
@@ -88,10 +89,10 @@ pip_install(
 
 http_archive(
     name = "rules_pkg",
-    sha256 = "6b5969a7acd7b60c02f816773b06fcf32fbe8ba0c7919ccdc2df4f8fb923804a",
+    sha256 = "038f1caa773a7e35b3663865ffb003169c6a71dc995e39bf4815792f385d837d",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/rules_pkg/releases/download/0.3.0/rules_pkg-0.3.0.tar.gz",
-        "https://github.com/bazelbuild/rules_pkg/releases/download/0.3.0/rules_pkg-0.3.0.tar.gz",
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_pkg/releases/download/0.4.0/rules_pkg-0.4.0.tar.gz",
+        "https://github.com/bazelbuild/rules_pkg/releases/download/0.4.0/rules_pkg-0.4.0.tar.gz",
     ],
 )
 
@@ -111,11 +112,22 @@ load("@rules_antlr//antlr:repositories.bzl", "rules_antlr_dependencies")
 
 rules_antlr_dependencies("4.7.2")
 
+# XXX(lukedirtwalker): Temporary workaround for rules_docker SHA issues.
+# Remove once https://github.com/bazelbuild/rules_docker/pull/1829 is merged.
+go_repository(
+    name = "com_github_google_go_containerregistry",
+    importpath = "github.com/google/go-containerregistry",
+    sha256 = "bc0136a33f9c1e4578a700f7afcdaa1241cfff997d6bba695c710d24c5ae26bd",
+    strip_prefix = "google-go-containerregistry-efb2d62",
+    type = "tar.gz",
+    urls = ["https://api.github.com/repos/google/go-containerregistry/tarball/efb2d62d93a7705315b841d0544cb5b13565ff2a"],  # v0.4.1
+)
+
 http_archive(
     name = "io_bazel_rules_docker",
-    sha256 = "58636bf623c8ccd2c0d70a6b108619a2f07bc284ad270a6b21fb635d4dd1ecfc",
-    strip_prefix = "rules_docker-6c29619903b6bc533ad91967f41f2a3448758e6f",
-    urls = ["https://github.com/bazelbuild/rules_docker/archive/6c29619903b6bc533ad91967f41f2a3448758e6f.tar.gz"],
+    sha256 = "95d39fd84ff4474babaf190450ee034d958202043e366b9fc38f438c9e6c3334",
+    strip_prefix = "rules_docker-0.16.0",
+    urls = ["https://github.com/bazelbuild/rules_docker/releases/download/v0.16.0/rules_docker-v0.16.0.tar.gz"],
 )
 
 load("@io_bazel_rules_docker//repositories:repositories.bzl", container_repositories = "repositories")
@@ -148,8 +160,8 @@ dpkg_src(
     name = "debian10_snap",
     arch = "amd64",
     distro = "buster",
-    sha256 = "f251129edc5e5b31dadd7bb252e5ce88b3fdbd76de672bc0bbcda4f667d5f47f",
-    snapshot = "20200612T083553Z",
+    sha256 = "b044c73a46671536011a26aedd8490dd31140538264ac12f26dc6dd0b4f0fcb8",
+    snapshot = "20210404T202957Z",
     url = "https://snapshot.debian.org/archive",
 )
 
@@ -157,16 +169,16 @@ dpkg_src(
     name = "debian10_updates_snap",
     arch = "amd64",
     distro = "buster-updates",
-    sha256 = "24b35fcd184d71f83c3f553a72e6636954552331adfbbc694f0f70bd33e1a2b4",
-    snapshot = "20200612T083553Z",
+    sha256 = "0c3115aeed29d5a8626633de68f2e409b2d182d7351521c46999634f62606de5",
+    snapshot = "20210404T202957Z",
     url = "https://snapshot.debian.org/archive",
 )
 
 dpkg_src(
     name = "debian10_security_snap",
-    package_prefix = "https://snapshot.debian.org/archive/debian-security/20200612T105246Z/",
-    packages_gz_url = "https://snapshot.debian.org/archive/debian-security/20200612T105246Z/dists/buster/updates/main/binary-amd64/Packages.gz",
-    sha256 = "c0ae35609f2d445e73ca8d3c03dc843f5ddae50f474cee10e79c4c1284ce2a2d",
+    package_prefix = "https://snapshot.debian.org/archive/debian-security/20210404T121356Z/",
+    packages_gz_url = "https://snapshot.debian.org/archive/debian-security/20210404T121356Z/dists/buster/updates/main/binary-amd64/Packages.gz",
+    sha256 = "5a21ba772818036ba9df9a200544fd10cb4a4685d928d018f472ef19d0f0442c",
 )
 
 dpkg_list(
@@ -184,54 +196,9 @@ dpkg_list(
         "netbase",
         "openssl",
         "tzdata",
-        # Needed by sig acceptance
-        # ping and its dependencies
-        "iputils-ping",
+        # Needed to add network capabilities to apps.
         "libcap2",
         "libcap2-bin",
-        "libidn2-0",
-        "libunistring2",
-        "libnettle6",
-        # iproute2 and its dependencies
-        "iproute2",
-        "libelf1",
-        # for perf tests
-        "iperf",
-        # so that status pages can be downloaded
-        "wget",
-        #
-        "ethtool",
-        # iptables and its dependencies (only not already present)
-        "gcc-8-base",
-        "iptables",
-        "libip4tc0",
-        "libip6tc0",
-        "libiptc0",
-        "libnetfilter-conntrack3",
-        "libnfnetlink0",
-        "libnftnl11",
-        "libxtables12",
-        # telnet and its dependencies (only not already present)
-        "telnet",
-        # sysctl and dependencies
-        "procps",
-        "libgpm2",
-        "libncurses6",
-        "libprocps7",
-        "lsb-base",
-        "psmisc",
-        # needed by bbcp
-        "libssl1.1",
-        "openssh-server",
-        "openssh-client",
-        "libwrap0",
-        "libkrb5-3",
-        "libgssapi-krb5-2",
-        "libk5crypto3",
-        "libkrb5support0",
-        "libkeyutils1",
-        # needed for brctl
-        "bridge-utils",
     ],
     # From Distroless WORKSPACE:
     # Takes the first package found: security updates should go first
@@ -321,12 +288,13 @@ http_archive(
     url = "https://github.com/bazelbuild/buildtools/archive/2.2.1.zip",
 )
 
-# TODO(lukedirtwalker): Use in-tree version for this.
-# This commit is from https://github.com/jmhodges/bazel_gomock/pull/49
 http_archive(
     name = "com_github_jmhodges_bazel_gomock",
-    strip_prefix = "bazel_gomock-7e1f48084f0b833bfd1e607555b456639f24bb6e",
-    url = "https://github.com/jmhodges/bazel_gomock/archive/7e1f48084f0b833bfd1e607555b456639f24bb6e.tar.gz",
+    sha256 = "2da16771642ce7f75a8d620a1029b83ee29b206c6665bb8c92f003b427e35dbf",
+    strip_prefix = "bazel_gomock-4f2ee840432b1a08ccc46ee4f2c1f5a2bad8fade",
+    urls = [
+        "https://github.com/jmhodges/bazel_gomock/archive/4f2ee840432b1a08ccc46ee4f2c1f5a2bad8fade.tar.gz",
+    ],
 )
 
 http_file(

@@ -24,6 +24,7 @@ import (
 	"github.com/scionproto/scion/go/lib/env/envtest"
 	"github.com/scionproto/scion/go/lib/log/logtest"
 	"github.com/scionproto/scion/go/pkg/api/apitest"
+	"github.com/scionproto/scion/go/pkg/api/jwtauth"
 	storagetest "github.com/scionproto/scion/go/pkg/storage/test"
 )
 
@@ -67,7 +68,7 @@ func CheckTestConfig(t *testing.T, cfg *Config, id string) {
 	storagetest.CheckTestRenewalDBConfig(t, &cfg.RenewalDB, id)
 	CheckTestBSConfig(t, &cfg.BS)
 	CheckTestPSConfig(t, &cfg.PS, id)
-	CheckTestCA(t, &cfg.CA, id)
+	CheckTestCA(t, &cfg.CA)
 }
 
 func CheckTestBSConfig(t *testing.T, cfg *BSConfig) {
@@ -93,8 +94,20 @@ func CheckTestPSConfig(t *testing.T, cfg *PSConfig, id string) {
 	assert.Empty(t, cfg.HiddenPathsCfg)
 }
 
-func InitTestCA(cfg *CA) {}
+func InitTestCA(cfg *CA) {
+	cfg.DisableLegacyRequest = true
+}
 
-func CheckTestCA(t *testing.T, cfg *CA, id string) {
+func CheckTestCA(t *testing.T, cfg *CA) {
 	assert.Equal(t, DefaultMaxASValidity, cfg.MaxASValidity.Duration)
+	assert.Equal(t, cfg.DisableLegacyRequest, false)
+	assert.Equal(t, cfg.Mode, InProcess)
+	CheckTestService(t, &cfg.Service)
+}
+
+func CheckTestService(t *testing.T, cfg *CAService) {
+	assert.Empty(t, cfg.SharedSecret)
+	assert.Empty(t, cfg.Address)
+	assert.Equal(t, jwtauth.DefaultTokenLifetime, cfg.Lifetime.Duration)
+	assert.Empty(t, cfg.ClientID)
 }

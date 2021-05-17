@@ -33,7 +33,28 @@ const caSample = `
 # the case, certificate renewal is not possible until a new CA certificate is
 # loaded that satisfies the condition. (default 3d)
 max_as_validity = "3d"
+
+# The mode the CA handler of this control service operates in.
+#
+# - in-process: In this mode, the certificates are renewed in the control
+#               service process. This means it needs access to the CA private
+#               key and a currently active CA certificate.
+#
+# - delegated: In this mode, the certificate renewal is delegated to the CA
+#              service via an API call. This means the service needs to be
+#              configured with the CA service address and the secrets to
+#              authenticate itself. Note that legacy requests will always
+#              be handled in-process, even if delegated mode is selected.
+#
+# (default in-process)
+mode = "in-process"
+
+# Disable handling of the legacy certificate renewal requests.
+# This option is temporary and will be removed with the support for
+# legacy renewal requests. (default false)
+disable_legacy_request = false
 `
+
 const drkeySample = `
 # EpochDuration of the DRKey secret value and of all derived keys. (default "24h")
 epoch_duration = "24h"
@@ -41,4 +62,17 @@ epoch_duration = "24h"
 const drkeyDelegationListSample = `
 # The list of hosts authorized to get a DS per protocol.
 piskes = [ "127.0.0.1", "127.0.0.2"]
+`
+
+const serviceSample = `
+# The path to the PEM-encoded shared secret that is used to create JWT tokens.
+shared_secret = ""
+# The address of the CA Service that handles the delegated certificate renewal requests.
+addr = ""
+# The validity period of self-generated JWT authorization tokens. The format
+# is a Go duration. If not set, the application default in this sample is used instead.
+lifetime = "10m"
+# The client identification string that should be used in self-generated JWT
+# authorization tokens. If not set, the SCION ID is used instead.
+client_id = ""
 `

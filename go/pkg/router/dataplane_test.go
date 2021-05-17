@@ -32,10 +32,12 @@ import (
 
 	"github.com/scionproto/scion/go/lib/addr"
 	"github.com/scionproto/scion/go/lib/common"
+	libepic "github.com/scionproto/scion/go/lib/epic"
 	"github.com/scionproto/scion/go/lib/scrypto"
 	"github.com/scionproto/scion/go/lib/slayers"
 	"github.com/scionproto/scion/go/lib/slayers/path"
 	"github.com/scionproto/scion/go/lib/slayers/path/empty"
+	"github.com/scionproto/scion/go/lib/slayers/path/epic"
 	"github.com/scionproto/scion/go/lib/slayers/path/onehop"
 	"github.com/scionproto/scion/go/lib/slayers/path/scion"
 	"github.com/scionproto/scion/go/lib/topology"
@@ -200,7 +202,7 @@ func TestDataPlaneRun(t *testing.T) {
 
 				totalCount := 10
 				mInternal := mock_router.NewMockBatchConn(ctrl)
-				mInternal.EXPECT().ReadBatch(gomock.Any(), gomock.Any()).Return(0, nil).AnyTimes()
+				mInternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 
 				for i := 0; i < 10; i++ {
 					ii := i
@@ -220,11 +222,11 @@ func TestDataPlaneRun(t *testing.T) {
 				_ = ret.AddInternalInterface(mInternal, net.IP{})
 
 				mExternal := mock_router.NewMockBatchConn(ctrl)
-				mExternal.EXPECT().ReadBatch(gomock.Any(), gomock.Any()).DoAndReturn(
-					func(m underlayconn.Messages, meta []underlayconn.ReadMeta) (int, error) {
+				mExternal.EXPECT().ReadBatch(gomock.Any()).DoAndReturn(
+					func(m underlayconn.Messages) (int, error) {
 						// 10 scion messages to external
 						for i := 0; i < totalCount; i++ {
-							spkt, dpath := prepBaseMsg()
+							spkt, dpath := prepBaseMsg(time.Now())
 							spkt.DstIA = local
 							dpath.HopFields = []*path.HopField{
 								{ConsIngress: 41, ConsEgress: 40},
@@ -248,7 +250,7 @@ func TestDataPlaneRun(t *testing.T) {
 						return 10, nil
 					},
 				).Times(1)
-				mExternal.EXPECT().ReadBatch(gomock.Any(), gomock.Any()).Return(0, nil).AnyTimes()
+				mExternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 				mExternal.EXPECT().WriteBatch(gomock.Any()).Return(0, nil).AnyTimes()
 
 				_ = ret.AddExternalInterface(1, mExternal)
@@ -290,8 +292,8 @@ func TestDataPlaneRun(t *testing.T) {
 				}
 
 				mInternal := mock_router.NewMockBatchConn(ctrl)
-				mInternal.EXPECT().ReadBatch(gomock.Any(), gomock.Any()).DoAndReturn(
-					func(m underlayconn.Messages, meta []underlayconn.ReadMeta) (int, error) {
+				mInternal.EXPECT().ReadBatch(gomock.Any()).DoAndReturn(
+					func(m underlayconn.Messages) (int, error) {
 						i := 0
 						for k := range routers { // post a BFD from each neighbor router
 							disc := layers.BFDDiscriminator(i)
@@ -306,7 +308,7 @@ func TestDataPlaneRun(t *testing.T) {
 						return len(routers), nil
 					},
 				).Times(1)
-				mInternal.EXPECT().ReadBatch(gomock.Any(), gomock.Any()).Return(0, nil).AnyTimes()
+				mInternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 
 				mInternal.EXPECT().WriteBatch(gomock.Any()).DoAndReturn(
 					func(ms underlayconn.Messages) (int, error) {
@@ -382,7 +384,7 @@ func TestDataPlaneRun(t *testing.T) {
 						done <- struct{}{}
 						return 1, nil
 					}).MinTimes(1)
-				mInternal.EXPECT().ReadBatch(gomock.Any(), gomock.Any()).Return(0, nil).AnyTimes()
+				mInternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 
 				_ = ret.SetKey([]byte("randomkeyformacs"))
 				_ = ret.AddInternalInterface(mInternal, net.IP{})
@@ -397,10 +399,10 @@ func TestDataPlaneRun(t *testing.T) {
 				ret := &router.DataPlane{Metrics: metrics}
 				ifID := uint16(1)
 				mInternal := mock_router.NewMockBatchConn(ctrl)
-				mInternal.EXPECT().ReadBatch(gomock.Any(), gomock.Any()).Return(0, nil).AnyTimes()
+				mInternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 
 				mExternal := mock_router.NewMockBatchConn(ctrl)
-				mExternal.EXPECT().ReadBatch(gomock.Any(), gomock.Any()).Return(0, nil).AnyTimes()
+				mExternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 				mExternal.EXPECT().WriteBatch(gomock.Any()).DoAndReturn(
 					func(ms underlayconn.Messages) (int, error) {
 						pkt := gopacket.NewPacket(ms[0].Buffers[0],
@@ -472,14 +474,14 @@ func TestDataPlaneRun(t *testing.T) {
 				}
 
 				mInternal := mock_router.NewMockBatchConn(ctrl)
-				mInternal.EXPECT().ReadBatch(gomock.Any(), gomock.Any()).Return(0, nil).AnyTimes()
+				mInternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 
 				mtx := sync.Mutex{}
 				expectRemoteDiscriminators := map[int]struct{}{}
 
 				mExternal := mock_router.NewMockBatchConn(ctrl)
-				mExternal.EXPECT().ReadBatch(gomock.Any(), gomock.Any()).DoAndReturn(
-					func(m underlayconn.Messages, meta []underlayconn.ReadMeta) (int, error) {
+				mExternal.EXPECT().ReadBatch(gomock.Any()).DoAndReturn(
+					func(m underlayconn.Messages) (int, error) {
 						raw := postExternalBFD(2, 1)
 						expectRemoteDiscriminators[2] = struct{}{}
 						copy(m[0].Buffers[0], raw)
@@ -488,7 +490,7 @@ func TestDataPlaneRun(t *testing.T) {
 						return 1, nil
 					},
 				).Times(1)
-				mExternal.EXPECT().ReadBatch(gomock.Any(), gomock.Any()).Return(0, nil).AnyTimes()
+				mExternal.EXPECT().ReadBatch(gomock.Any()).Return(0, nil).AnyTimes()
 
 				mExternal.EXPECT().WriteBatch(gomock.Any()).DoAndReturn(
 					func(ms underlayconn.Messages) (int, error) {
@@ -557,6 +559,9 @@ func TestProcessPkt(t *testing.T) {
 	defer ctrl.Finish()
 
 	key := []byte("testkey_xxxxxxxx")
+	now := time.Now()
+	epicTS, err := libepic.CreateTimestamp(now, now)
+	require.NoError(t, err)
 
 	testCases := map[string]struct {
 		mockMsg      func(bool) *ipv4.Message
@@ -570,7 +575,7 @@ func TestProcessPkt(t *testing.T) {
 					nil, xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, dpath := prepBaseMsg()
+				spkt, dpath := prepBaseMsg(now)
 				spkt.DstIA = xtest.MustParseIA("1-ff00:0:110")
 				dst := &net.IPAddr{IP: net.ParseIP("10.0.100.100").To4()}
 				_ = spkt.SetDstAddr(dst)
@@ -603,7 +608,7 @@ func TestProcessPkt(t *testing.T) {
 					nil, nil, nil, xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, dpath := prepBaseMsg()
+				spkt, dpath := prepBaseMsg(now)
 				spkt.SrcIA = xtest.MustParseIA("1-ff00:0:110")
 				dpath.HopFields = []*path.HopField{
 					{ConsIngress: 0, ConsEgress: 1},
@@ -638,7 +643,7 @@ func TestProcessPkt(t *testing.T) {
 					nil, nil, nil, xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, dpath := prepBaseMsg()
+				spkt, dpath := prepBaseMsg(now)
 				dpath.HopFields = []*path.HopField{
 					{ConsIngress: 31, ConsEgress: 30},
 					{ConsIngress: 1, ConsEgress: 2},
@@ -671,7 +676,7 @@ func TestProcessPkt(t *testing.T) {
 					}, nil, nil, nil, xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, dpath := prepBaseMsg()
+				spkt, dpath := prepBaseMsg(now)
 				dpath.HopFields = []*path.HopField{
 					{ConsIngress: 31, ConsEgress: 30},
 					{ConsIngress: 2, ConsEgress: 1},
@@ -706,7 +711,7 @@ func TestProcessPkt(t *testing.T) {
 					}, nil, xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, dpath := prepBaseMsg()
+				spkt, dpath := prepBaseMsg(now)
 				dpath.HopFields = []*path.HopField{
 					{ConsIngress: 31, ConsEgress: 30},
 					{ConsIngress: 1, ConsEgress: 3},
@@ -736,7 +741,7 @@ func TestProcessPkt(t *testing.T) {
 					}, nil, xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, _ := prepBaseMsg()
+				spkt, _ := prepBaseMsg(now)
 				dpath := &scion.Decoded{
 					Base: scion.Base{
 						PathMeta: scion.MetaHdr{
@@ -748,9 +753,9 @@ func TestProcessPkt(t *testing.T) {
 					},
 					InfoFields: []*path.InfoField{
 						// up seg
-						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(time.Now())},
+						{SegID: 0x111, ConsDir: false, Timestamp: util.TimeToSecs(now)},
 						// core seg
-						{SegID: 0x222, ConsDir: false, Timestamp: util.TimeToSecs(time.Now())},
+						{SegID: 0x222, ConsDir: false, Timestamp: util.TimeToSecs(now)},
 					},
 					HopFields: []*path.HopField{
 						{ConsIngress: 0, ConsEgress: 1},  // IA 110
@@ -789,7 +794,7 @@ func TestProcessPkt(t *testing.T) {
 					xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, dpath := prepBaseMsg()
+				spkt, dpath := prepBaseMsg(now)
 				_ = spkt.SetDstAddr(addr.HostSVCFromString("CS"))
 				spkt.DstIA = xtest.MustParseIA("1-ff00:0:110")
 				dpath.HopFields = []*path.HopField{
@@ -817,7 +822,7 @@ func TestProcessPkt(t *testing.T) {
 					xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, dpath := prepBaseMsg()
+				spkt, dpath := prepBaseMsg(now)
 				_ = spkt.SetDstAddr(addr.HostSVCFromString("CS"))
 				spkt.DstIA = xtest.MustParseIA("1-ff00:0:110")
 				dpath.HopFields = []*path.HopField{
@@ -844,7 +849,7 @@ func TestProcessPkt(t *testing.T) {
 					xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, dpath := prepBaseMsg()
+				spkt, dpath := prepBaseMsg(now)
 				_ = spkt.SetDstAddr(addr.HostSVCFromString("BS"))
 				spkt.DstIA = xtest.MustParseIA("1-ff00:0:110")
 				dpath.HopFields = []*path.HopField{
@@ -881,7 +886,7 @@ func TestProcessPkt(t *testing.T) {
 					xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, _ := prepBaseMsg()
+				spkt, _ := prepBaseMsg(now)
 				spkt.PathType = onehop.PathType
 				spkt.DstIA = xtest.MustParseIA("1-ff00:0:110")
 				err := spkt.SetDstAddr(addr.SVCMcast | addr.SvcCS)
@@ -943,7 +948,7 @@ func TestProcessPkt(t *testing.T) {
 					xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, _ := prepBaseMsg()
+				spkt, _ := prepBaseMsg(now)
 				spkt.PathType = scion.PathType
 				spkt.SrcIA = xtest.MustParseIA("1-ff00:0:110")
 				err := spkt.SetDstAddr(addr.SVCMcast | addr.SvcCS)
@@ -1001,7 +1006,7 @@ func TestProcessPkt(t *testing.T) {
 					xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, _ := prepBaseMsg()
+				spkt, _ := prepBaseMsg(now)
 				spkt.PathType = onehop.PathType
 				spkt.SrcIA = xtest.MustParseIA("1-ff00:0:110")
 				err := spkt.SetDstAddr(addr.SVCMcast | addr.SvcCS)
@@ -1040,7 +1045,7 @@ func TestProcessPkt(t *testing.T) {
 					xtest.MustParseIA("1-ff00:0:110"), key)
 			},
 			mockMsg: func(afterProcessing bool) *ipv4.Message {
-				spkt, dpath := prepBaseMsg()
+				spkt, dpath := prepBaseMsg(now)
 				spkt.DstIA = xtest.MustParseIA("1-ff00:0:f1")
 				dpath.HopFields = []*path.HopField{
 					{ConsIngress: 41, ConsEgress: 40},
@@ -1055,6 +1060,73 @@ func TestProcessPkt(t *testing.T) {
 					ret.Flags, ret.NN, ret.N, ret.OOB = 0, 0, 0, nil
 				}
 				return ret
+			},
+			srcInterface: 1,
+			assertFunc:   assert.Error,
+		},
+		"epic inbound": {
+			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+				return router.NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+					nil, xtest.MustParseIA("1-ff00:0:110"), key)
+			},
+			mockMsg: func(afterProcessing bool) *ipv4.Message {
+				spkt, epicpath, dpath := prepEpicMsg(t,
+					afterProcessing, key, epicTS, now)
+
+				prepareEpicCrypto(t, spkt, epicpath, dpath, key)
+				return toIP(t, spkt, epicpath, afterProcessing)
+			},
+			srcInterface: 1,
+			assertFunc:   assert.NoError,
+		},
+		"epic malformed path": {
+			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+				return router.NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+					nil, xtest.MustParseIA("1-ff00:0:110"), key)
+			},
+			mockMsg: func(afterProcessing bool) *ipv4.Message {
+				spkt, epicpath, dpath := prepEpicMsg(t,
+					afterProcessing, key, epicTS, now)
+				prepareEpicCrypto(t, spkt, epicpath, dpath, key)
+
+				// Wrong path type
+				return toIP(t, spkt, &scion.Decoded{}, afterProcessing)
+			},
+			srcInterface: 1,
+			assertFunc:   assert.Error,
+		},
+		"epic invalid timestamp": {
+			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+				return router.NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+					nil, xtest.MustParseIA("1-ff00:0:110"), key)
+			},
+			mockMsg: func(afterProcessing bool) *ipv4.Message {
+				spkt, epicpath, dpath := prepEpicMsg(t,
+					afterProcessing, key, epicTS, now)
+
+				// Invalid timestamp
+				epicpath.PktID.Timestamp = epicpath.PktID.Timestamp + 250000
+
+				prepareEpicCrypto(t, spkt, epicpath, dpath, key)
+				return toIP(t, spkt, epicpath, afterProcessing)
+			},
+			srcInterface: 1,
+			assertFunc:   assert.Error,
+		},
+		"epic invalid LHVF": {
+			prepareDP: func(ctrl *gomock.Controller) *router.DataPlane {
+				return router.NewDP(nil, nil, mock_router.NewMockBatchConn(ctrl), nil,
+					nil, xtest.MustParseIA("1-ff00:0:110"), key)
+			},
+			mockMsg: func(afterProcessing bool) *ipv4.Message {
+				spkt, epicpath, dpath := prepEpicMsg(t,
+					afterProcessing, key, epicTS, now)
+				prepareEpicCrypto(t, spkt, epicpath, dpath, key)
+
+				// Invalid LHVF
+				epicpath.LHVF = []byte{0, 0, 0, 0}
+
+				return toIP(t, spkt, epicpath, afterProcessing)
 			},
 			srcInterface: 1,
 			assertFunc:   assert.Error,
@@ -1104,7 +1176,7 @@ func toMsg(t *testing.T, spkt *slayers.SCION, dpath path.Path) *ipv4.Message {
 	return ret
 }
 
-func prepBaseMsg() (*slayers.SCION, *scion.Decoded) {
+func prepBaseMsg(now time.Time) (*slayers.SCION, *scion.Decoded) {
 	spkt := &slayers.SCION{
 		Version:      0,
 		TrafficClass: 0xb8,
@@ -1114,6 +1186,7 @@ func prepBaseMsg() (*slayers.SCION, *scion.Decoded) {
 		DstIA:        xtest.MustParseIA("4-ff00:0:411"),
 		SrcIA:        xtest.MustParseIA("2-ff00:0:222"),
 		Path:         &scion.Raw{},
+		PayloadLen:   18,
 	}
 
 	dpath := &scion.Decoded{
@@ -1126,7 +1199,7 @@ func prepBaseMsg() (*slayers.SCION, *scion.Decoded) {
 			NumHops: 3,
 		},
 		InfoFields: []*path.InfoField{
-			{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(time.Now())},
+			{SegID: 0x111, ConsDir: true, Timestamp: util.TimeToSecs(now)},
 		},
 
 		HopFields: []*path.HopField{},
@@ -1134,11 +1207,78 @@ func prepBaseMsg() (*slayers.SCION, *scion.Decoded) {
 	return spkt, dpath
 }
 
+func prepEpicMsg(t *testing.T, afterProcessing bool, key []byte,
+	epicTS uint32, now time.Time) (*slayers.SCION, *epic.Path, *scion.Decoded) {
+
+	spkt, dpath := prepBaseMsg(now)
+	spkt.PathType = epic.PathType
+
+	spkt.DstIA = xtest.MustParseIA("1-ff00:0:110")
+	dpath.HopFields = []*path.HopField{
+		{ConsIngress: 41, ConsEgress: 40},
+		{ConsIngress: 31, ConsEgress: 30},
+		{ConsIngress: 01, ConsEgress: 0},
+	}
+	dpath.Base.PathMeta.CurrHF = 2
+	dpath.Base.PathMeta.CurrINF = 0
+
+	pktID := epic.PktID{
+		Timestamp: epicTS,
+		Counter:   libepic.PktCounterFromCore(1, 2),
+	}
+
+	epicpath := &epic.Path{
+		PktID: pktID,
+		PHVF:  make([]byte, 4),
+		LHVF:  make([]byte, 4),
+	}
+	spkt.SetSrcAddr(&net.IPAddr{IP: net.ParseIP("10.0.200.200").To4()})
+	spkt.Path = epicpath
+
+	return spkt, epicpath, dpath
+}
+
+func prepareEpicCrypto(t *testing.T, spkt *slayers.SCION,
+	epicpath *epic.Path, dpath *scion.Decoded, key []byte) {
+
+	// Calculate SCION MAC
+	dpath.HopFields[2].Mac = computeMAC(t, key, dpath.InfoFields[0], dpath.HopFields[2])
+	scionPath, err := dpath.ToRaw()
+	require.NoError(t, err)
+	epicpath.ScionPath = scionPath
+
+	// Generate EPIC authenticator
+	authLast := computeFullMAC(t, key, dpath.InfoFields[0], dpath.HopFields[2])
+
+	// Calculate PHVF and LHVF
+	macLast, err := libepic.CalcMac(authLast, epicpath.PktID,
+		spkt, dpath.InfoFields[0].Timestamp)
+	require.NoError(t, err)
+	copy(epicpath.LHVF, macLast)
+}
+
+func toIP(t *testing.T, spkt *slayers.SCION, path path.Path, afterProcessing bool) *ipv4.Message {
+	// Encapsulate in IPv4
+	dst := &net.IPAddr{IP: net.ParseIP("10.0.100.100").To4()}
+	require.NoError(t, spkt.SetDstAddr(dst))
+	ret := toMsg(t, spkt, path)
+	if afterProcessing {
+		ret.Addr = &net.UDPAddr{IP: dst.IP, Port: topology.EndhostPort}
+		ret.Flags, ret.NN, ret.N, ret.OOB = 0, 0, 0, nil
+	}
+	return ret
+}
+
 func computeMAC(t *testing.T, key []byte, info *path.InfoField, hf *path.HopField) []byte {
 	mac, err := scrypto.InitMac(key)
 	require.NoError(t, err)
 	return path.MAC(mac, info, hf)
+}
 
+func computeFullMAC(t *testing.T, key []byte, info *path.InfoField, hf *path.HopField) []byte {
+	mac, err := scrypto.InitMac(key)
+	require.NoError(t, err)
+	return path.FullMAC(mac, info, hf)
 }
 
 func createMac(t *testing.T) hash.Hash {

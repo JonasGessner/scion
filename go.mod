@@ -4,10 +4,10 @@ require (
 	github.com/antlr/antlr4 v0.0.0-20181218183524-be58ebffde8e
 	github.com/buildkite/go-buildkite v2.2.1-0.20190413010238-568b6651b687+incompatible
 	github.com/dchest/cmac v0.0.0-20150527144652-62ff55a1048c
-	github.com/deepmap/oapi-codegen v1.5.1
+	github.com/deepmap/oapi-codegen v1.6.1
 	github.com/fatih/color v1.9.0
-	github.com/getkin/kin-openapi v0.49.0
-	github.com/go-chi/chi v1.5.1
+	github.com/getkin/kin-openapi v0.53.0
+	github.com/go-chi/chi/v5 v5.0.2
 	github.com/go-chi/cors v1.1.1
 	github.com/go-kit/kit v0.10.0
 	github.com/go-openapi/swag v0.19.14 // indirect
@@ -20,6 +20,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/grpc-ecosystem/grpc-opentracing v0.0.0-20180507213350-8e809c8a8645
 	github.com/iancoleman/strcase v0.0.0-20190422225806-e506e3ef7365
+	github.com/lestrrat-go/jwx v1.1.5
 	github.com/lucas-clemente/quic-go v0.19.2
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-isatty v0.0.12
@@ -44,7 +45,6 @@ require (
 	go.uber.org/goleak v1.1.10
 	go.uber.org/zap v1.16.0
 	golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83
-	golang.org/x/mod v0.4.1 // indirect
 	golang.org/x/net v0.0.0-20210226172049-e18ecbb05110
 	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
 	golang.org/x/sys v0.0.0-20210309074719-68d13333faf2 // indirect

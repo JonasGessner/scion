@@ -16,11 +16,13 @@ package certs
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -37,6 +39,7 @@ import (
 	"github.com/scionproto/scion/go/lib/infra/messenger"
 	"github.com/scionproto/scion/go/lib/log"
 	"github.com/scionproto/scion/go/lib/sciond"
+	"github.com/scionproto/scion/go/lib/scrypto/cms/protocol"
 	"github.com/scionproto/scion/go/lib/scrypto/cppki"
 	"github.com/scionproto/scion/go/lib/scrypto/signed"
 	"github.com/scionproto/scion/go/lib/serrors"
@@ -45,6 +48,7 @@ import (
 	"github.com/scionproto/scion/go/lib/snet/squic"
 	"github.com/scionproto/scion/go/lib/sock/reliable"
 	"github.com/scionproto/scion/go/lib/svc"
+	"github.com/scionproto/scion/go/lib/tracing"
 	"github.com/scionproto/scion/go/pkg/app/feature"
 	"github.com/scionproto/scion/go/pkg/ca/renewal"
 	"github.com/scionproto/scion/go/pkg/command"
@@ -53,81 +57,8 @@ import (
 	"github.com/scionproto/scion/go/pkg/trust"
 )
 
-type subjectVars struct {
-	CommonName         string  `json:"common_name,omitempty"`
-	Country            string  `json:"country,omitempty"`
-	ISDAS              addr.IA `json:"isd_as,omitempty"`
-	Locality           string  `json:"locality,omitempty"`
-	Organization       string  `json:"organization,omitempty"`
-	OrganizationalUnit string  `json:"organizational_unit,omitempty"`
-	PostalCode         string  `json:"postal_code,omitempty"`
-	Province           string  `json:"province,omitempty"`
-	SerialNumber       string  `json:"serial_number,omitempty"`
-	StreetAddress      string  `json:"street_address,omitempty"`
-}
-
-func newRenewCmd(pather command.Pather) *cobra.Command {
-	var flags struct {
-		keyFile           string
-		outFile           string
-		templateFile      string
-		transportCertFile string
-		transportKeyFile  string
-		trcFilePath       string
-
-		dispatcherPath string
-		sciondAddr     string
-		listen         net.IP
-		timeout        time.Duration
-
-		features []string
-	}
-
-	cmd := &cobra.Command{
-		Use:   "renew",
-		Short: "Renew AS certificate",
-		Args:  cobra.MaximumNArgs(1),
-		Example: fmt.Sprintf(`  %[1]s renew
-	--key cp-as.key \
-	--transportcert ISD1-ASff00_0_112.pem \
-	--transportkey cp-as.key \
-	--trc ISD1-B1-S1.trc
-
-  %[1]s renew
-	--key fresh.key \
-	--transportcert ISD1-ASff00_0_112.pem \
-	--transportkey cp-as.key \
-	--trc ISD1-B1-S1.trc \
-	--template csr.json \
-	  1-ff00:0:110
-		`, pather.CommandPath()),
-		Long: `'renew' sends a certificate chain renewal request to the CA control service.
-
-The transport certificate chain and key are used to sign the renewal requests.
-In order for the CA to be able to verify the request, the chain must already
-be known to the CA. Either through an out-of-bound bootstrapping mechanism where
-the CA preloads it, or from a previous certificate chain renewal.
-
-The TRC is used to validate and verify the renewed certificate chain. Ensure
-that it contains the root certificate that the CA is using.
-
-The renewed certificate chain is written to the file system, if it is verifiable
-with the supplied TRC. In case the out flag is not specified, the chain is
-written to 'ISDx-ASy.s.pem' in the same directory as the transport certificate
-chain, where x is the ISD number, y is the AS number, and s is the hex encoded
-serial number of the AS certificate in the renewed certificate chain. If the
-chain verification against the TRC fails, the renewed certificate chain is
-written to the out file with the suffix '.unverified' and the command fails.
-
-The positional argument is the ISD-AS of the CA where the renewal request is
-sent to. If it is not set, the ISD-AS is extracted from the transport
-certificate chain.
-
-Unless a template is specified, the subject of the transport certificate chain
-is used as the subject for the renewal request.
-
-The template is expressed in JSON. A valid example:
-
+const (
+	subjectHelp = `
   {
     "common_name": "1-ff00:0:110 AS certificate",
     "country": "CH",
@@ -153,7 +84,92 @@ schema. For more information on JSON schemas, see https://json-schema.org/.
     },
     "required": ["isd_as"]
   }
-		`,
+`
+)
+
+type Features struct {
+	DisableLegacyRequest bool `feature:"disable_legacy_request"`
+	DisableCMSRequest    bool `feature:"disable_cms_request"`
+}
+
+type SubjectVars struct {
+	CommonName         string  `json:"common_name,omitempty"`
+	Country            string  `json:"country,omitempty"`
+	ISDAS              addr.IA `json:"isd_as,omitempty"`
+	Locality           string  `json:"locality,omitempty"`
+	Organization       string  `json:"organization,omitempty"`
+	OrganizationalUnit string  `json:"organizational_unit,omitempty"`
+	PostalCode         string  `json:"postal_code,omitempty"`
+	Province           string  `json:"province,omitempty"`
+	SerialNumber       string  `json:"serial_number,omitempty"`
+	StreetAddress      string  `json:"street_address,omitempty"`
+}
+
+func newRenewCmd(pather command.Pather) *cobra.Command {
+	var flags struct {
+		keyFile           string
+		outFile           string
+		csrFile           string
+		reqFile           string
+		templateFile      string
+		transportCertFile string
+		transportKeyFile  string
+		trcFiles          []string
+
+		dispatcherPath string
+		sciondAddr     string
+		listen         net.IP
+		timeout        time.Duration
+
+		features []string
+		tracer   string
+	}
+
+	cmd := &cobra.Command{
+		Use:   "renew",
+		Short: "Renew AS certificate",
+		Args:  cobra.MaximumNArgs(1),
+		Example: fmt.Sprintf(`  %[1]s renew
+	--key cp-as.key \
+	--transportcert ISD1-ASff00_0_112.pem \
+	--transportkey cp-as.key \
+	--trc ISD1-B1-S1.trc,ISD1-B1-S2.trc
+
+  %[1]s renew
+	--key fresh.key \
+	--transportcert ISD1-ASff00_0_112.pem \
+	--transportkey cp-as.key \
+	--trc ISD1-B1-S1.trc \
+	--template csr.json \
+	  1-ff00:0:110
+		`, pather.CommandPath()),
+		Long: `'renew' sends a certificate chain renewal request to the CA control service.
+
+The transport certificate chain and key are used to sign the renewal requests.
+In order for the CA to be able to verify the request, the chain must already
+be known to the CA either through an out-of-bound bootstrapping mechanism where
+the CA preloads it, or from a previous certificate chain renewal.
+
+The TRC is used to validate and verify the renewed certificate chain. Ensure
+that it contains the root certificate that the CA is using.
+
+The renewed certificate chain is written to the file system, if it is verifiable
+with the supplied TRCs. In case the out flag is not specified, the chain is
+written to 'ISDx-ASy.s.pem' in the same directory as the transport certificate
+chain, where x is the ISD number, y is the AS number, and s is the hex encoded
+serial number of the AS certificate in the renewed certificate chain. If the
+chain verification against the TRCs fails, the renewed certificate chain is
+written to the out file with the suffix '.unverified' and the command fails.
+
+The positional argument is the ISD-AS of the CA where the renewal request is
+sent to. If it is not set, the ISD-AS is extracted from the transport
+certificate chain.
+
+Unless a template is specified, the subject of the transport certificate chain
+is used as the subject for the renewal request.
+
+The template is expressed in JSON. A valid example:
+` + subjectHelp,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var ca addr.IA
 			if len(args) != 0 {
@@ -162,15 +178,34 @@ schema. For more information on JSON schemas, see https://json-schema.org/.
 					return err
 				}
 			}
+			closer, err := setupTracer("scion-pki", flags.tracer)
+			if err != nil {
+				return serrors.WrapStr("setting up tracing", err)
+			}
+			defer closer()
+
 			cmd.SilenceUsage = true
+
+			var features Features
+			if err := feature.Parse(flags.features, &features); err != nil {
+				return err
+			}
+			if features.DisableCMSRequest && features.DisableLegacyRequest {
+				return serrors.New("both legacy and CMS request disabled")
+			}
+
+			span, ctx := tracing.CtxWith(context.Background(), "certs.renew")
+			span.SetTag("feature.disable_legacy_request", features.DisableLegacyRequest)
+			span.SetTag("feature.disable_cms_request", features.DisableCMSRequest)
+			defer span.Finish()
 
 			log.Setup(log.Config{Console: log.ConsoleConfig{Level: "crit"}})
 
-			trc, err := loadTRC(flags.trcFilePath)
+			trcs, err := loadTRCs(flags.trcFiles)
 			if err != nil {
 				return err
 			}
-			chain, transportCA, err := loadChain(trc, flags.transportCertFile)
+			chain, transportCA, err := loadChain(trcs, flags.transportCertFile)
 			if err != nil {
 				return err
 			}
@@ -178,13 +213,14 @@ schema. For more information on JSON schemas, see https://json-schema.org/.
 				ca = transportCA
 				fmt.Println("Extracted remote from transport certificate chain: ", ca)
 			}
+			span.SetTag("dst.isd_as", ca)
 
 			// Step 1. create CSR.
-			tmpl, err := csrTemplate(chain, flags.templateFile)
+			key, err := readECKey(flags.keyFile)
 			if err != nil {
 				return err
 			}
-			key, err := readECKey(flags.keyFile)
+			tmpl, err := csrTemplate(chain[0], key.Public(), flags.templateFile)
 			if err != nil {
 				return err
 			}
@@ -192,9 +228,19 @@ schema. For more information on JSON schemas, see https://json-schema.org/.
 			if err != nil {
 				return err
 			}
+			if flags.csrFile != "" {
+				pemCSR := pem.EncodeToMemory(&pem.Block{
+					Type:  "CERTIFICATE REQUEST",
+					Bytes: csr,
+				})
+				if err := ioutil.WriteFile(flags.csrFile, pemCSR, 0666); err != nil {
+					// The CSR is not important, carry on with execution.
+					fmt.Fprintln(os.Stderr, "Failed writing CSR:", err.Error())
+				}
+			}
 
 			// Step 2. create messenger.
-			ctx, cancel := context.WithTimeout(context.Background(), flags.timeout)
+			ctx, cancel := context.WithTimeout(ctx, flags.timeout)
 			defer cancel()
 			sds := sciond.NewService(flags.sciondAddr)
 
@@ -206,21 +252,55 @@ schema. For more information on JSON schemas, see https://json-schema.org/.
 				local.Host = &net.UDPAddr{IP: flags.listen}
 			}
 
-			remote := &snet.UDPAddr{
-				IA: ca,
-			}
+			remote := &snet.UDPAddr{IA: ca}
 			disp := reliable.NewDispatcher(flags.dispatcherPath)
 			dialer, err := buildDialer(ctx, disp, sds, local, remote)
 			if err != nil {
 				return err
 			}
 
-			// Step 3. renewal scion call.
-			signer, err := createSigner(local.IA, trc, chain, flags.transportKeyFile)
+			// Step 3. create the request.
+			signer, err := createSigner(local.IA, trcs[0], chain, flags.transportKeyFile)
 			if err != nil {
 				return err
 			}
-			renewed, err := renew(ctx, csr, remote.IA, signer, dialer)
+			var req cppb.ChainRenewalRequest
+			if !features.DisableLegacyRequest {
+				legacyReq, err := renewal.NewLegacyChainRenewalRequest(ctx, csr, signer)
+				if err != nil {
+					return err
+				}
+				req.SignedRequest = legacyReq.SignedRequest
+			}
+			if !features.DisableCMSRequest {
+				cmsReq, err := renewal.NewChainRenewalRequest(ctx, csr, signer)
+				if err != nil {
+					return err
+				}
+				req.CmsSignedRequest = cmsReq.CmsSignedRequest
+			}
+			if flags.reqFile != "" {
+				if req.CmsSignedRequest == nil {
+					return serrors.New("cannot write request to file: no request created")
+				}
+				pemReq := pem.EncodeToMemory(&pem.Block{
+					Type:  "CMS",
+					Bytes: req.CmsSignedRequest,
+				})
+				if err := ioutil.WriteFile(flags.reqFile, pemReq, 0666); err != nil {
+					// The request is not important, carry on with execution.
+					fmt.Fprintln(os.Stderr, "Failed writing CSR:", err.Error())
+				}
+			}
+
+			// Step 4. send the request via SCION.
+			rep, err := sendRequest(ctx, remote.IA, dialer, &req)
+			if err != nil {
+				return err
+			}
+
+			// Step 5. extract and verify chain.
+			renewed, err := extractChain(rep)
 			if err != nil {
 				return err
 			}
@@ -230,17 +310,24 @@ schema. For more information on JSON schemas, see https://json-schema.org/.
 				out = outFileFromSubject(renewed, filepath.Dir(flags.transportCertFile))
 			}
 
-			// Step 4. verify with trc.
-			if err := cppki.VerifyChain(renewed, cppki.VerifyOptions{TRC: &trc.TRC}); err != nil {
+			verifyOptions := cppki.VerifyOptions{TRC: trcs}
+			if err := cppki.VerifyChain(renewed, verifyOptions); err != nil {
 				out += ".unverified"
 				fmt.Println("Verification failed, writing chain: ", out)
 				if err := writeChain(renewed, out); err != nil {
 					fmt.Println("Failed to write unverified chain: ", err)
 				}
+
+				if maybeMissingTRCInGrace(trcs) {
+					fmt.Println("Verification failed, but current time still in Grace Period " +
+						"of latest TRC")
+					fmt.Printf("Try to verify with the predecessor TRC: (Base = %d, Serial = %d)\n",
+						trcs[0].ID.Base, trcs[0].ID.Serial-1)
+				}
 				return serrors.WrapStr("verification failed", err)
 			}
 
-			// Step 5. write to disk.
+			// Step 6. write to disk.
 			if err := writeChain(renewed, out); err != nil {
 				return err
 			}
@@ -261,7 +348,9 @@ schema. For more information on JSON schemas, see https://json-schema.org/.
 	cmd.Flags().StringVar(&flags.transportKeyFile, "transportkey", "",
 		"Private key file to sign the CSR control-plane message (required)")
 	cmd.MarkFlagRequired("transportkey")
-	cmd.Flags().StringVar(&flags.trcFilePath, "trc", "", "Trusted TRC (required)")
+	cmd.Flags().StringSliceVar(&flags.trcFiles, "trc", []string{},
+		"Comma-separated trusted TRCs. If more than two TRCs are specified, only up to "+
+			"two active TRCs with the highest Base version are used (required)")
 	cmd.MarkFlagRequired("trc")
 	cmd.Flags().DurationVar(&flags.timeout, "timeout", 5*time.Second,
 		"Timeout for command")
@@ -273,17 +362,27 @@ schema. For more information on JSON schemas, see https://json-schema.org/.
 		"Optional local IP address")
 	cmd.Flags().StringVar(&flags.outFile, "out", "",
 		"File where renewed certificate chain is written")
+	cmd.Flags().StringVar(&flags.csrFile, "csr-out", "",
+		"File where the CSR for the requested certificate chain is written")
+	cmd.Flags().StringVar(&flags.reqFile, "req-out", "",
+		"File where the signed CMS request is written")
 	cmd.Flags().StringSliceVar(&flags.features, "features", nil,
-		fmt.Sprintf("enable development features (%v)", feature.String(&feature.Default{}, "|")))
+		fmt.Sprintf("enable development features (%v)", feature.String(&Features{}, "|")))
+	cmd.Flags().StringVar(&flags.tracer, "tracing.agent", "", "Tracing agent address")
 	return cmd
 }
 
-func loadChain(trc cppki.SignedTRC, file string) ([]*x509.Certificate, addr.IA, error) {
+func loadChain(trcs []*cppki.TRC, file string) ([]*x509.Certificate, addr.IA, error) {
 	chain, err := cppki.ReadPEMCerts(file)
 	if err != nil {
 		return nil, addr.IA{}, err
 	}
-	if err := cppki.VerifyChain(chain, cppki.VerifyOptions{TRC: &trc.TRC}); err != nil {
+	if err := cppki.VerifyChain(chain, cppki.VerifyOptions{TRC: trcs}); err != nil {
+		if maybeMissingTRCInGrace(trcs) {
+			fmt.Println("Verification failed, but current time still in Grace Period of latest TRC")
+			fmt.Printf("Try to verify with the predecessor TRC: (Base = %d, Serial = %d)\n",
+				trcs[0].ID.Base, trcs[0].ID.Serial-1)
+		}
 		return nil, addr.IA{}, serrors.WrapStr(
 			"verification of transport cert failed with provided TRC", err)
 	}
@@ -294,7 +393,7 @@ func loadChain(trc cppki.SignedTRC, file string) ([]*x509.Certificate, addr.IA, 
 	return chain, ia, nil
 }
 
-func createSigner(srcIA addr.IA, trc cppki.SignedTRC, chain []*x509.Certificate,
+func createSigner(srcIA addr.IA, trc *cppki.TRC, chain []*x509.Certificate,
 	keyFile string) (trust.Signer, error) {
 
 	key, err := readECKey(keyFile)
@@ -309,24 +408,26 @@ func createSigner(srcIA addr.IA, trc cppki.SignedTRC, chain []*x509.Certificate,
 		PrivateKey:   key,
 		Algorithm:    algo,
 		IA:           srcIA,
-		TRCID:        trc.TRC.ID,
+		TRCID:        trc.ID,
 		SubjectKeyID: chain[0].SubjectKeyId,
 		Expiration:   time.Now().Add(2 * time.Hour),
 		ChainValidity: cppki.Validity{
 			NotBefore: chain[0].NotBefore,
 			NotAfter:  chain[0].NotAfter,
 		},
+		Subject: chain[0].Subject,
+		Chain:   chain,
 	}
 	return signer, nil
 }
 
-func renew(ctx context.Context, csr []byte, dstIA addr.IA, signer trust.Signer,
-	dialer grpc.Dialer) ([]*x509.Certificate, error) {
+func sendRequest(
+	ctx context.Context,
+	dstIA addr.IA,
+	dialer grpc.Dialer,
+	req *cppb.ChainRenewalRequest,
+) (*cppb.ChainRenewalResponse, error) {
 
-	req, err := renewal.NewLegacyChainRenewalRequest(ctx, csr, signer)
-	if err != nil {
-		return nil, err
-	}
 	dstSVC := &snet.SVCAddr{
 		IA:  dstIA,
 		SVC: addr.SvcCS,
@@ -341,11 +442,41 @@ func renew(ctx context.Context, csr []byte, dstIA addr.IA, signer trust.Signer,
 	if err != nil {
 		return nil, err
 	}
+	return reply, err
+}
+
+func extractChain(rep *cppb.ChainRenewalResponse) ([]*x509.Certificate, error) {
 	// XXX(karampok). We should verify the signature on the payload, but that
 	// implies having a full trust engine that is capable of resolving missing
 	// certificate chains for the CA. We skip it, since the chain itself is
 	// verified against the TRC, and thus, risk is very low.
-	body, err := signed.ExtractUnverifiedBody(reply.SignedResponse)
+	if len(rep.CmsSignedResponse) == 0 {
+		return extractChainLegacy(rep)
+	}
+	ci, err := protocol.ParseContentInfo(rep.CmsSignedResponse)
+	if err != nil {
+		return nil, err
+	}
+	sd, err := ci.SignedDataContent()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := sd.EncapContentInfo.DataEContent()
+	if err != nil {
+		return nil, err
+	}
+	chain, err := x509.ParseCertificates(raw)
+	if err != nil {
+		return nil, err
+	}
+	if err := cppki.ValidateChain(chain); err != nil {
+		return nil, err
+	}
+	return chain, nil
+}
+
+func extractChainLegacy(rep *cppb.ChainRenewalResponse) ([]*x509.Certificate, error) {
+	body, err := signed.ExtractUnverifiedBody(rep.SignedResponse)
 	if err != nil {
 		return nil, err
 	}
@@ -366,20 +497,42 @@ func renew(ctx context.Context, csr []byte, dstIA addr.IA, signer trust.Signer,
 	return chain, nil
 }
 
-func csrTemplate(chain []*x509.Certificate, tmpl string) (*x509.CertificateRequest, error) {
-	if tmpl == "" {
-		s := chain[0].Subject
-		s.ExtraNames = s.Names
-		return &x509.CertificateRequest{
-			Subject: s,
-		}, nil
+func csrTemplate(
+	prev *x509.Certificate,
+	pub crypto.PublicKey,
+	tmpl string,
+) (*x509.CertificateRequest, error) {
+
+	s := prev.Subject
+	s.ExtraNames = prev.Subject.Names
+
+	if tmpl != "" {
+		var err error
+		if s, err = subjectFromTemplate(tmpl); err != nil {
+			return nil, err
+		}
 	}
+	exts, err := buildExtensions(pub)
+	if err != nil {
+		return nil, serrors.WrapStr("building extensions", err)
+	}
+	return &x509.CertificateRequest{
+		Subject:         s,
+		ExtraExtensions: exts,
+	}, nil
+}
+
+func subjectFromTemplate(tmpl string) (pkix.Name, error) {
 	vars, err := readVars(tmpl)
 	if err != nil {
-		return nil, serrors.WrapStr("reading template", err)
+		return pkix.Name{}, serrors.WrapStr("reading template", err)
 	}
+	return subjectFromVars(vars)
+}
+
+func subjectFromVars(vars SubjectVars) (pkix.Name, error) {
 	if vars.ISDAS.IsZero() {
-		return nil, serrors.New("isd_as required in template")
+		return pkix.Name{}, serrors.New("isd_as required in template")
 	}
 	s := pkix.Name{
 		CommonName:   vars.CommonName,
@@ -404,9 +557,7 @@ func csrTemplate(chain []*x509.Certificate, tmpl string) (*x509.CertificateReque
 			*field = []string{value}
 		}
 	}
-	return &x509.CertificateRequest{
-		Subject: s,
-	}, nil
+	return s, nil
 }
 
 func buildDialer(ctx context.Context, ds reliable.Dispatcher, sds sciond.Service,
@@ -473,14 +624,14 @@ func readECKey(file string) (*ecdsa.PrivateKey, error) {
 	return v, nil
 }
 
-func readVars(file string) (subjectVars, error) {
-	c := subjectVars{}
+func readVars(file string) (SubjectVars, error) {
+	c := SubjectVars{}
 	raw, err := ioutil.ReadFile(file)
 	if err != nil {
-		return subjectVars{}, err
+		return SubjectVars{}, err
 	}
 	if err := json.Unmarshal(raw, &c); err != nil {
-		return subjectVars{}, err
+		return SubjectVars{}, err
 	}
 	return c, nil
 }
@@ -533,4 +684,56 @@ type svcRouter struct {
 func (r svcRouter) GetUnderlay(svc addr.HostSVC) (*net.UDPAddr, error) {
 	// XXX(karampok). We need to change the interface to not use TODO context.
 	return sciond.TopoQuerier{Connector: r.Connector}.UnderlayAnycast(context.TODO(), svc)
+}
+
+func buildExtensions(pub crypto.PublicKey) ([]pkix.Extension, error) {
+	subKeyID, err := subjectKeyID(pub)
+	if err != nil {
+		return nil, serrors.WrapStr("creating SubjectKeyID extension", err)
+	}
+	return []pkix.Extension{
+		keyUsage(),
+		extKeyUsage(),
+		subKeyID,
+	}, nil
+}
+
+func subjectKeyID(pub crypto.PublicKey) (pkix.Extension, error) {
+	skid, err := cppki.SubjectKeyID(pub)
+	if err != nil {
+		return pkix.Extension{}, err
+	}
+	val, err := asn1.Marshal(skid)
+	if err != nil {
+		return pkix.Extension{}, err
+	}
+	return pkix.Extension{
+		Id:    cppki.OIDExtensionSubjectKeyID,
+		Value: val,
+	}, nil
+}
+
+func keyUsage() pkix.Extension {
+	// 0x80 corresponds to x509.KeyUsageDigitalSignature
+	val, err := asn1.Marshal(asn1.BitString{Bytes: []byte{0x80}, BitLength: 1})
+	if err != nil {
+		panic(err)
+	}
+	return pkix.Extension{
+		Id:       cppki.OIDExtensionKeyUsage,
+		Critical: true,
+		Value:    val,
+	}
+}
+
+func extKeyUsage() pkix.Extension {
+	return extendedKeyUsages(
+		cppki.OIDExtKeyUsageServerAuth,
+		cppki.OIDExtKeyUsageClientAuth,
+		cppki.OIDExtKeyUsageTimeStamping,
+	)
+}
+
+func maybeMissingTRCInGrace(trcs []*cppki.TRC) bool {
+	return len(trcs) == 1 && trcs[0].InGracePeriod(time.Now())
 }

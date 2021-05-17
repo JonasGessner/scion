@@ -66,7 +66,7 @@ func TestCombine(t *testing.T) {
 		runCmd("sh", "-c", fmt.Sprintf("cp -a %s testdata/", filepath.Join(dir, "admin/.")))
 
 		// Sort signer infos for deterministic result.
-		signed, err := trcs.DecodeFromFile("./testdata/admin/ISD-B1-S1.trc")
+		signed, err := trcs.DecodeFromFile("./testdata/admin/ISD1-B1-S1.trc")
 		require.NoError(t, err)
 		infos := signed.SignerInfos
 		sort.Slice(infos, func(i, j int) bool {
@@ -74,7 +74,7 @@ func TestCombine(t *testing.T) {
 		})
 		raw, err := signed.Encode()
 		require.NoError(t, err)
-		ioutil.WriteFile("./testdata/admin/ISD-B1-S1.trc", raw, 0644)
+		ioutil.WriteFile("./testdata/admin/ISD1-B1-S1.trc", raw, 0644)
 	}
 
 	dir, clean := xtest.MustTempDir("", "scion-pki-trcs-combine")
@@ -82,30 +82,47 @@ func TestCombine(t *testing.T) {
 	out := filepath.Join(dir, "combined.der")
 
 	parts := []string{
-		"./testdata/admin/bern/ISD-B1-S1.regular.trc",
-		"./testdata/admin/bern/ISD-B1-S1.sensitive.trc",
-		"./testdata/admin/geneva/ISD-B1-S1.regular.trc",
-		"./testdata/admin/geneva/ISD-B1-S1.sensitive.trc",
-		"./testdata/admin/zürich/ISD-B1-S1.regular.trc",
-		"./testdata/admin/zürich/ISD-B1-S1.sensitive.trc",
+		"./testdata/admin/bern/ISD1-B1-S1.regular.trc",
+		"./testdata/admin/bern/ISD1-B1-S1.sensitive.trc",
+		"./testdata/admin/geneva/ISD1-B1-S1.regular.trc",
+		"./testdata/admin/geneva/ISD1-B1-S1.sensitive.trc",
+		"./testdata/admin/zürich/ISD1-B1-S1.regular.trc",
+		"./testdata/admin/zürich/ISD1-B1-S1.sensitive.trc",
 		// Duplicates
-		"./testdata/admin/bern/ISD-B1-S1.sensitive.trc",
-		"./testdata/admin/geneva/ISD-B1-S1.regular.trc",
+		"./testdata/admin/bern/ISD1-B1-S1.sensitive.trc",
+		"./testdata/admin/geneva/ISD1-B1-S1.regular.trc",
 	}
 
-	err := trcs.RunCombine(parts, "./testdata/admin/ISD-B1-S1.pld.der", out)
-	require.NoError(t, err)
-	written, err := trcs.DecodeFromFile(out)
-	require.NoError(t, err)
-	dec, err := trcs.DecodeFromFile(out)
-	require.NoError(t, err)
-	assert.Equal(t, dec, written)
+	testCases := map[string]struct {
+		pld    string
+		format string
+	}{
+		"der format": {
+			pld:    "./testdata/admin/ISD1-B1-S1.pld.der",
+			format: "der",
+		},
+		"pem format": {
+			pld:    "./testdata/admin/ISD1-B1-S1.pld.pem",
+			format: "pem",
+		},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			err := trcs.RunCombine(parts, tc.pld, out, tc.format)
+			require.NoError(t, err)
+			written, err := trcs.DecodeFromFile(out)
+			require.NoError(t, err)
+			dec, err := trcs.DecodeFromFile(out)
+			require.NoError(t, err)
+			assert.Equal(t, dec, written)
 
-	assert.Len(t, written.SignerInfos, 6)
+			assert.Len(t, written.SignerInfos, 6)
+		})
+	}
 }
 
 func TestCombineSignerInfos(t *testing.T) {
-	signed, err := trcs.DecodeFromFile("./testdata/admin/ISD-B1-S1.trc")
+	signed, err := trcs.DecodeFromFile("./testdata/admin/ISD1-B1-S1.trc")
 	require.NoError(t, err)
 
 	testCases := map[string]struct {

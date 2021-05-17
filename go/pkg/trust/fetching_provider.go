@@ -88,6 +88,9 @@ func (p FetchingProvider) GetChains(ctx context.Context, query ChainQuery,
 		"date", util.TimeToCompact(query.Date),
 		"subject_key_id", fmt.Sprintf("%x", query.SubjectKeyID))
 
+	if query.IA.IsWildcard() {
+		return nil, serrors.New("ISD-AS must not contain a wildcard", "isd_as", query.IA)
+	}
 	if query.Date.IsZero() {
 		query.Date = time.Now()
 		logger.Debug("Set date for chain request with zero time")
@@ -190,6 +193,11 @@ func (p FetchingProvider) NotifyTRC(ctx context.Context, id cppki.TRCID, opts ..
 		setProviderMetric(span, l.WithResult(metrics.ErrDB), err)
 		return err
 	}
+	if trc.IsZero() {
+		err := serrors.New("no TRC for ISD present", "isd", id.ISD)
+		setProviderMetric(span, l.WithResult(metrics.ErrNotFound), err)
+		return err
+	}
 	if trc.TRC.ID.Base != id.Base {
 		setProviderMetric(span, l.WithResult(metrics.ErrValidate), nil)
 		return serrors.New("base number mismatch", "expected", trc.TRC.ID.Base, "actual", id.Base)
@@ -271,7 +279,8 @@ func filterVerifiableChains(chains [][]*x509.Certificate,
 	verified := make([][]*x509.Certificate, 0, len(chains))
 	for _, chain := range chains {
 		for _, trc := range trcs {
-			if err := cppki.VerifyChain(chain, cppki.VerifyOptions{TRC: &trc.TRC}); err == nil {
+			verifyOptions := cppki.VerifyOptions{TRC: []*cppki.TRC{&trc.TRC}}
+			if err := cppki.VerifyChain(chain, verifyOptions); err == nil {
 				verified = append(verified, chain)
 				break
 			}

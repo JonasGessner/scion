@@ -14,6 +14,7 @@ set -e
 
 STARTDATE="20200624120000Z"
 ENDDATE="20210624120000Z"
+TRCID="ISD1-B1-S1"
 
 echo "#####################"
 echo "# Preparation Phase #"
@@ -141,28 +142,28 @@ sed -i \
     -e 's/{{.NotBefore}}/1593000000/g' \
     -e 's/{{.Validity}}/"365d"/g' \
     -e "s/{{.CertFiles}}/[$files]/g" \
-    ISD-B1-S1.toml
+    $TRCID.toml
 
 echo "Phase 2: display payload config"
 echo "-------------------------------"
-cat ISD-B1-S1.toml
+cat $TRCID.toml
 echo "-------------------------------"
 
 # LITERALINCLUDE create_payload START
-scion-pki trcs payload -t ISD-B1-S1.toml -o ISD-B1-S1.pld.der
+scion-pki trcs payload -t $TRCID.toml -o $TRCID.pld.der
 # LITERALINCLUDE create_payload END
 
 echo "Phase 2: display payload digest"
 echo "-------------------------------"
 # LITERALINCLUDE payload_digest START
-sha256sum ISD-B1-S1.pld.der
+sha256sum $TRCID.pld.der
 # LITERALINCLUDE payload_digest END
 echo "-------------------------------"
 
 echo "Phase 2: copy payload"
-cp ISD-B1-S1.pld.der $SAFEDIR/bern
-cp ISD-B1-S1.pld.der $SAFEDIR/geneva
-cp ISD-B1-S1.pld.der $SAFEDIR/zürich
+cp $TRCID.pld.der $SAFEDIR/bern
+cp $TRCID.pld.der $SAFEDIR/geneva
+cp $TRCID.pld.der $SAFEDIR/zürich
 
 echo "###########"
 echo "# Phase 3 #"
@@ -175,7 +176,7 @@ do
     set_dirs
 
     in_docker "cd /workdir && display_payload && sign_payload && check_signed_payload"
-    cp ISD-B1-S1.{regular,sensitive}.trc $SAFEDIR/admin/$loc
+    cp $TRCID.{regular,sensitive}.trc $SAFEDIR/admin/$loc
 done
 
 echo "###########"
@@ -186,18 +187,18 @@ echo "Phase 4: combine TRC"
 cd $SAFEDIR/admin
 
 # LITERALINCLUDE combine_payload START
-scion-pki trcs combine -p ISD-B1-S1.pld.der \
-    bern/ISD-B1-S1.sensitive.trc \
-    bern/ISD-B1-S1.regular.trc \
-    geneva/ISD-B1-S1.sensitive.trc \
-    geneva/ISD-B1-S1.regular.trc \
-    zürich/ISD-B1-S1.sensitive.trc \
-    zürich/ISD-B1-S1.regular.trc \
-    -o ISD-B1-S1.trc
+scion-pki trcs combine -p $TRCID.pld.der \
+    bern/$TRCID.sensitive.trc \
+    bern/$TRCID.regular.trc \
+    geneva/$TRCID.sensitive.trc \
+    geneva/$TRCID.regular.trc \
+    zürich/$TRCID.sensitive.trc \
+    zürich/$TRCID.regular.trc \
+    -o $TRCID.trc
 # LITERALINCLUDE combine_payload END
 
 # LITERALINCLUDE verify_payload START
-scion-pki trcs verify --anchor ISD-B1-S1.trc ISD-B1-S1.trc
+scion-pki trcs verify --anchor $TRCID.trc $TRCID.trc
 # LITERALINCLUDE verify_payload END
 in_docker "cd /workdir && verify_trc"
 
@@ -205,7 +206,7 @@ in_docker "cd /workdir && verify_trc"
 echo "Phase 4: display trc digest"
 echo "---------------------------"
 # LITERALINCLUDE trc_digest START
-sha256sum ISD-B1-S1.trc
+sha256sum $TRCID.trc
 # LITERALINCLUDE trc_digest END
 echo "---------------------------"
 
@@ -214,7 +215,7 @@ do
     echo "Phase 4: $loc verify"
     cd $SAFEDIR/$loc
 
-    cp $SAFEDIR/admin/ISD-B1-S1.trc .
+    cp $SAFEDIR/admin/$TRCID.trc .
     set_dirs
     in_docker "cd /workdir && verify_trc && display_signatures"
 done
@@ -238,7 +239,7 @@ do
     in_docker "navigate_pubdir && gen_as && check_as"
     check_as_type
     cat cp-as.crt cp-ca.crt > chain.pem
-    scion-pki certs verify --trc ../ISD-B1-S1.trc --currenttime 1593000000 chain.pem
+    scion-pki certs verify --trc ../$TRCID.trc --currenttime 1593000000 chain.pem
 done
 
 echo "###########"

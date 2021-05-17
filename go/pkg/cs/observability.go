@@ -61,6 +61,9 @@ type Metrics struct {
 	BeaconingRegisteredTotal               *prometheus.CounterVec
 	BeaconingRegistrarInternalErrorsTotal  *prometheus.CounterVec
 	DiscoveryRequestsTotal                 *prometheus.CounterVec
+	RenewalServerRequestsTotal             *prometheus.CounterVec
+	RenewalHandledRequestsTotal            *prometheus.CounterVec
+	RenewalRegisteredHandlers              *prometheus.GaugeVec
 	SegmentLookupRequestsTotal             *prometheus.CounterVec
 	SegmentLookupSegmentsSentTotal         *prometheus.CounterVec
 	SegmentRegistrationsTotal              *prometheus.CounterVec
@@ -127,6 +130,28 @@ func NewMetrics() *Metrics {
 				Help: "Total number of path segments requests received.",
 			},
 			[]string{"dst_isd", "seg_type", prom.LabelResult},
+		),
+		RenewalServerRequestsTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "renewal_received_requests_total",
+				Help: "Total number of renewal requests served.",
+			},
+			[]string{prom.LabelResult},
+		),
+		RenewalHandledRequestsTotal: promauto.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "renewal_handled_requests_total",
+				Help: "Total number of renewal requests served by each handler type" +
+					" (legacy, in-process, delegating).",
+			},
+			[]string{prom.LabelResult, "type"},
+		),
+		RenewalRegisteredHandlers: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "renewal_registered_handlers",
+				Help: "Exposes which handler type (legacy, in-process, delegating) is registered.",
+			},
+			[]string{"type"},
 		),
 		SegmentLookupSegmentsSentTotal: promauto.NewCounterVec(
 			prometheus.CounterOpts{

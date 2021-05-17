@@ -16,6 +16,7 @@ package trust
 
 import (
 	"context"
+	"encoding/pem"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -90,7 +91,7 @@ func LoadChains(ctx context.Context, dir string, db DB) (LoadResult, error) {
 			res.Ignored[f] = serrors.New("TRC not found", "isd", ia.I)
 			continue
 		}
-		opts := cppki.VerifyOptions{TRC: &trc.TRC}
+		opts := cppki.VerifyOptions{TRC: []*cppki.TRC{&trc.TRC}}
 		if err := cppki.VerifyChain(chain, opts); err != nil {
 			res.Ignored[f] = err
 			continue
@@ -127,6 +128,10 @@ func LoadTRCs(ctx context.Context, dir string, db DB) (LoadResult, error) {
 		raw, err := ioutil.ReadFile(f)
 		if err != nil {
 			return res, serrors.WithCtx(err, "file", f)
+		}
+		block, _ := pem.Decode(raw)
+		if block != nil && block.Type == "TRC" {
+			raw = block.Bytes
 		}
 		trc, err := cppki.DecodeSignedTRC(raw)
 		if err != nil {

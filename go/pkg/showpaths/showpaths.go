@@ -30,8 +30,7 @@ import (
 	"github.com/scionproto/scion/go/lib/sciond"
 	"github.com/scionproto/scion/go/lib/serrors"
 	"github.com/scionproto/scion/go/lib/snet"
-	"github.com/scionproto/scion/go/lib/snet/addrutil"
-	"github.com/scionproto/scion/go/pkg/app"
+	"github.com/scionproto/scion/go/pkg/app/path"
 	"github.com/scionproto/scion/go/pkg/pathprobe"
 )
 
@@ -63,7 +62,7 @@ type Hop struct {
 
 // Human writes human readable output to the writer.
 func (r Result) Human(w io.Writer, showExtendedMetadata, colored bool) {
-	cs := app.DefaultColorScheme(!colored)
+	cs := path.DefaultColorScheme(!colored)
 
 	idxWidth := len(fmt.Sprint(len(r.Paths) - 1))
 
@@ -128,7 +127,7 @@ func (r Result) Human(w io.Writer, showExtendedMetadata, colored bool) {
 
 // filteredKeyValues is analogous to app.ColorScheme.KeyValues, but ignores
 // entries with an empty value.
-func filteredKeyValues(cs app.ColorScheme, kv ...string) []string {
+func filteredKeyValues(cs path.ColorScheme, kv ...string) []string {
 	if len(kv)%2 != 0 {
 		panic("KeyValues expects even number of parameters")
 	}
@@ -148,8 +147,10 @@ func humanLatency(p *snet.PathMetadata) string {
 	complete := true
 	var tot time.Duration
 	for _, v := range p.Latency {
-		complete = complete && v > 0
-		tot += v
+		complete = complete && v >= 0
+		if v >= 0 {
+			tot += v
+		}
 	}
 	if complete {
 		return fmt.Sprint(tot)
@@ -182,7 +183,7 @@ func humanBandwidth(p *snet.PathMetadata) string {
 
 // humanGeo summarizes the geographical information in the meta data in a human
 // readable string. Returns empty string if no information is available.
-func humanGeo(p *snet.PathMetadata, cs app.ColorScheme) string {
+func humanGeo(p *snet.PathMetadata, cs path.ColorScheme) string {
 	geos := make([]string, len(p.Geo))
 	hasAny := false
 	for i, geo := range p.Geo {
@@ -305,11 +306,11 @@ func (r Result) Alive() int {
 func Run(ctx context.Context, dst addr.IA, cfg Config) (*Result, error) {
 	sdConn, err := sciond.NewService(cfg.SCIOND).Connect(ctx)
 	if err != nil {
-		return nil, serrors.WrapStr("error connecting to SCIOND", err, "addr", cfg.SCIOND)
+		return nil, serrors.WrapStr("connecting to the SCION Daemon", err, "addr", cfg.SCIOND)
 	}
 	localIA, err := sdConn.LocalIA(ctx)
 	if err != nil {
-		return nil, serrors.WrapStr("error determining local ISD-AS", err)
+		return nil, serrors.WrapStr("determining local ISD-AS", err)
 	}
 
 	// TODO(lukedirtwalker): Replace this with snet.Router once we have the
@@ -318,9 +319,9 @@ func Run(ctx context.Context, dst addr.IA, cfg Config) (*Result, error) {
 	allPaths, err := sdConn.Paths(ctx, dst, addr.IA{},
 		sciond.PathReqFlags{Refresh: cfg.Refresh})
 	if err != nil {
-		return nil, serrors.WrapStr("failed to retrieve paths from SCIOND", err)
+		return nil, serrors.WrapStr("retrieving paths from the SCION Daemon", err)
 	}
-	paths, err := app.Filter(cfg.Sequence, allPaths)
+	paths, err := path.Filter(cfg.Sequence, allPaths)
 	if err != nil {
 		return nil, err
 	}
@@ -329,27 +330,19 @@ func Run(ctx context.Context, dst addr.IA, cfg Config) (*Result, error) {
 	}
 
 	var statuses map[string]pathprobe.Status
-	var localIP net.IP
 	if !cfg.NoProbe {
-		// Resolve local IP in case it is not configured.
-		if localIP = cfg.Local; localIP == nil {
-			localIP, err = addrutil.DefaultLocalIP(ctx, sdConn)
-			if err != nil {
-				return nil, serrors.WrapStr("failed to determine local IP", err)
-			}
-		}
 		p := pathprobe.FilterEmptyPaths(paths)
 		statuses, err = pathprobe.Prober{
 			DstIA:   dst,
 			LocalIA: localIA,
-			LocalIP: localIP,
+			LocalIP: cfg.Local,
 			ID:      uint16(rand.Uint32()),
 		}.GetStatuses(ctx, p)
 		if err != nil {
-			return nil, serrors.WrapStr("failed to get status", err)
+			return nil, serrors.WrapStr("getting statuses", err)
 		}
 	}
-	app.SortPaths(paths)
+	path.Sort(paths)
 	res := &Result{
 		Destination: dst,
 		Paths:       []Path{},
@@ -372,7 +365,6 @@ func Run(ctx context.Context, dst addr.IA, cfg Config) (*Result, error) {
 			Expiry:      pathMeta.Expiry,
 			MTU:         pathMeta.MTU,
 			Latency:     pathMeta.Latency,
-			Local:       localIP,
 			Hops:        []Hop{},
 		}
 		for _, hop := range path.Metadata().Interfaces {
@@ -381,6 +373,7 @@ func Run(ctx context.Context, dst addr.IA, cfg Config) (*Result, error) {
 		if status, ok := statuses[pathprobe.PathKey(path)]; ok {
 			rpath.Status = strings.ToLower(string(status.Status))
 			rpath.StatusInfo = status.AdditionalInfo
+			rpath.Local = status.LocalIP
 		}
 		res.Paths = append(res.Paths, rpath)
 	}

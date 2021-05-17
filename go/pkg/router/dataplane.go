@@ -17,6 +17,7 @@ package router
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"hash"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/scionproto/scion/go/lib/addr"
 	"github.com/scionproto/scion/go/lib/common"
+	libepic "github.com/scionproto/scion/go/lib/epic"
 	"github.com/scionproto/scion/go/lib/log"
 	"github.com/scionproto/scion/go/lib/metrics"
 	"github.com/scionproto/scion/go/lib/scrypto"
@@ -40,6 +42,7 @@ import (
 	"github.com/scionproto/scion/go/lib/slayers"
 	"github.com/scionproto/scion/go/lib/slayers/path"
 	"github.com/scionproto/scion/go/lib/slayers/path/empty"
+	"github.com/scionproto/scion/go/lib/slayers/path/epic"
 	"github.com/scionproto/scion/go/lib/slayers/path/onehop"
 	"github.com/scionproto/scion/go/lib/slayers/path/scion"
 	"github.com/scionproto/scion/go/lib/topology"
@@ -73,7 +76,7 @@ type bfdSession interface {
 
 // BatchConn is a connection that supports batch reads and writes.
 type BatchConn interface {
-	ReadBatch(underlayconn.Messages, []underlayconn.ReadMeta) (int, error)
+	ReadBatch(underlayconn.Messages) (int, error)
 	WriteBatch(underlayconn.Messages) (int, error)
 	Close() error
 }
@@ -86,19 +89,20 @@ type BatchConn interface {
 // Currently, only the following features are supported:
 //  - initializing connections; MUST be done prior to calling Run
 type DataPlane struct {
-	external         map[uint16]BatchConn
-	linkTypes        map[uint16]topology.LinkType
-	neighborIAs      map[uint16]addr.IA
-	internal         BatchConn
-	internalIP       net.IP
-	internalNextHops map[uint16]net.Addr
-	svc              *services
-	macFactory       func() hash.Hash
-	bfdSessions      map[uint16]bfdSession
-	localIA          addr.IA
-	mtx              sync.Mutex
-	running          bool
-	Metrics          *Metrics
+	external          map[uint16]BatchConn
+	linkTypes         map[uint16]topology.LinkType
+	neighborIAs       map[uint16]addr.IA
+	internal          BatchConn
+	internalIP        net.IP
+	internalNextHops  map[uint16]net.Addr
+	svc               *services
+	macFactory        func() hash.Hash
+	bfdSessions       map[uint16]bfdSession
+	localIA           addr.IA
+	mtx               sync.Mutex
+	running           bool
+	Metrics           *Metrics
+	forwardingMetrics map[uint16]forwardingMetrics
 }
 
 var (
@@ -276,13 +280,13 @@ func (d *DataPlane) AddExternalInterfaceBFD(ifID uint16, conn BatchConn,
 		}
 	}
 	s := &bfdSend{
-		conn:       conn,
-		srcAddr:    src.Addr,
-		dstAddr:    dst.Addr,
-		srcIA:      src.IA,
-		dstIA:      dst.IA,
-		ifID:       ifID,
-		macFactory: d.macFactory,
+		conn:    conn,
+		srcAddr: src.Addr,
+		dstAddr: dst.Addr,
+		srcIA:   src.IA,
+		dstIA:   dst.IA,
+		ifID:    ifID,
+		mac:     d.macFactory(),
 	}
 	return d.addBFDController(ifID, s, cfg, m)
 }
@@ -417,13 +421,13 @@ func (d *DataPlane) AddNextHopBFD(ifID uint16, src, dst *net.UDPAddr, cfg contro
 		}
 	}
 	s := &bfdSend{
-		conn:       d.internal,
-		srcAddr:    src,
-		dstAddr:    dst,
-		srcIA:      d.localIA,
-		dstIA:      d.localIA,
-		ifID:       0,
-		macFactory: d.macFactory,
+		conn:    d.internal,
+		srcAddr: src,
+		dstAddr: dst,
+		srcIA:   d.localIA,
+		dstIA:   d.localIA,
+		ifID:    0,
+		mac:     d.macFactory(),
 	}
 	return d.addBFDController(ifID, s, cfg, m)
 }
@@ -437,18 +441,19 @@ func (d *DataPlane) Run() error {
 	d.initMetrics()
 
 	read := func(ingressID uint16, rd BatchConn) {
+
 		msgs := conn.NewReadMessages(inputBatchCnt)
 		for _, msg := range msgs {
 			msg.Buffers[0] = make([]byte, bufSize)
 		}
+		mac := d.macFactory()
 
 		var scmpErr scmpError
-		metas := make([]conn.ReadMeta, inputBatchCnt)
 		spkt := slayers.SCION{}
 		buffer := gopacket.NewSerializeBuffer()
 		origPacket := make([]byte, bufSize)
 		for d.running {
-			pkts, err := rd.ReadBatch(msgs, metas)
+			pkts, err := rd.ReadBatch(msgs)
 			if err != nil {
 				log.Debug("Failed to read batch", "err", err)
 				// error metric
@@ -464,12 +469,12 @@ func (d *DataPlane) Run() error {
 				copy(origPacket[:p.N], p.Buffers[0])
 
 				// input metric
-				inputLabels := interfaceToMetricLabels(ingressID, d.localIA, d.neighborIAs)
-				d.Metrics.InputPacketsTotal.With(inputLabels).Inc()
-				d.Metrics.InputBytesTotal.With(inputLabels).Add(float64(p.N))
+				inputCounters := d.forwardingMetrics[ingressID]
+				inputCounters.InputPacketsTotal.Inc()
+				inputCounters.InputBytesTotal.Add(float64(p.N))
 
 				result, err := d.processPkt(ingressID, p.Buffers[0], p.Addr, spkt, origPacket,
-					buffer)
+					buffer, mac)
 
 				switch {
 				case err == nil:
@@ -482,7 +487,7 @@ func (d *DataPlane) Run() error {
 					result.OutConn = rd
 				default:
 					log.Debug("Error processing packet", "err", err)
-					d.Metrics.DroppedPacketsTotal.With(inputLabels).Inc()
+					inputCounters.DroppedPacketsTotal.Inc()
 					continue
 				}
 				if result.OutConn == nil { // e.g. BFD case no message is forwarded
@@ -498,9 +503,9 @@ func (d *DataPlane) Run() error {
 					continue
 				}
 				// ok metric
-				outputLabels := interfaceToMetricLabels(result.EgressID, d.localIA, d.neighborIAs)
-				d.Metrics.OutputPacketsTotal.With(outputLabels).Inc()
-				d.Metrics.OutputBytesTotal.With(outputLabels).Add(float64(len(result.OutPkt)))
+				outputCounters := d.forwardingMetrics[result.EgressID]
+				outputCounters.OutputPacketsTotal.Inc()
+				outputCounters.OutputBytesTotal.Add(float64(len(result.OutPkt)))
 			}
 
 			// Reset buffers to original capacity.
@@ -534,23 +539,19 @@ func (d *DataPlane) Run() error {
 	select {}
 }
 
+// initMetrics initializes the metrics related to packet forwarding. The
+// counters are already instantiated for all the relevant interfaces so this
+// will not have to be repeated during packet forwarding.
 func (d *DataPlane) initMetrics() {
+	d.forwardingMetrics = make(map[uint16]forwardingMetrics)
 	labels := interfaceToMetricLabels(0, d.localIA, d.neighborIAs)
-	d.Metrics.InputBytesTotal.With(labels).Add(0)
-	d.Metrics.InputPacketsTotal.With(labels).Add(0)
-	d.Metrics.OutputBytesTotal.With(labels).Add(0)
-	d.Metrics.OutputPacketsTotal.With(labels).Add(0)
-	d.Metrics.DroppedPacketsTotal.With(labels).Add(0)
-	for id := range d.neighborIAs {
+	d.forwardingMetrics[0] = initForwardingMetrics(d.Metrics, labels)
+	for id := range d.external {
 		if _, notOwned := d.internalNextHops[id]; notOwned {
 			continue
 		}
 		labels = interfaceToMetricLabels(id, d.localIA, d.neighborIAs)
-		d.Metrics.InputBytesTotal.With(labels).Add(0)
-		d.Metrics.InputPacketsTotal.With(labels).Add(0)
-		d.Metrics.OutputBytesTotal.With(labels).Add(0)
-		d.Metrics.OutputPacketsTotal.With(labels).Add(0)
-		d.Metrics.DroppedPacketsTotal.With(labels).Add(0)
+		d.forwardingMetrics[id] = initForwardingMetrics(d.Metrics, labels)
 	}
 }
 
@@ -562,7 +563,7 @@ type processResult struct {
 }
 
 func (d *DataPlane) processPkt(ingressID uint16, rawPkt []byte, srcAddr net.Addr, s slayers.SCION,
-	origPacket []byte, buffer gopacket.SerializeBuffer) (processResult, error) {
+	origPacket []byte, buffer gopacket.SerializeBuffer, mac hash.Hash) (processResult, error) {
 
 	if err := s.DecodeFromBytes(rawPkt, gopacket.NilDecodeFeedback); err != nil {
 		return processResult{}, err
@@ -586,9 +587,11 @@ func (d *DataPlane) processPkt(ingressID uint16, rawPkt []byte, srcAddr net.Addr
 			}
 			return processResult{}, d.processInterBFD(ingressID, ohp, s.Payload)
 		}
-		return d.processOHP(ingressID, rawPkt, s, buffer)
+		return d.processOHP(ingressID, rawPkt, s, buffer, mac)
 	case scion.PathType:
-		return d.processSCION(ingressID, rawPkt, s, origPacket, buffer)
+		return d.processSCION(ingressID, rawPkt, s, origPacket, buffer, mac)
+	case epic.PathType:
+		return d.processEPIC(ingressID, rawPkt, s, origPacket, buffer, mac)
 	default:
 		return processResult{}, serrors.WithCtx(unsupportedPathType, "type", s.PathType)
 	}
@@ -649,7 +652,7 @@ func (d *DataPlane) processIntraBFD(src net.Addr, data []byte) error {
 }
 
 func (d *DataPlane) processSCION(ingressID uint16, rawPkt []byte, s slayers.SCION,
-	origPacket []byte, buffer gopacket.SerializeBuffer) (processResult, error) {
+	origPacket []byte, buffer gopacket.SerializeBuffer, mac hash.Hash) (processResult, error) {
 
 	p := scionPacketProcessor{
 		d:          d,
@@ -658,8 +661,74 @@ func (d *DataPlane) processSCION(ingressID uint16, rawPkt []byte, s slayers.SCIO
 		scionLayer: s,
 		origPacket: origPacket,
 		buffer:     buffer,
+		mac:        mac,
 	}
+
+	var ok bool
+	p.path, ok = p.scionLayer.Path.(*scion.Raw)
+	if !ok {
+		// TODO(lukedirtwalker) parameter problem invalid path?
+		return processResult{}, malformedPath
+	}
+
 	return p.process()
+}
+
+func (d *DataPlane) processEPIC(ingressID uint16, rawPkt []byte, s slayers.SCION,
+	origPacket []byte, buffer gopacket.SerializeBuffer, mac hash.Hash) (processResult, error) {
+
+	path, ok := s.Path.(*epic.Path)
+	if !ok {
+		return processResult{}, malformedPath
+	}
+
+	scionPath := path.ScionPath
+	if scionPath == nil {
+		return processResult{}, malformedPath
+	}
+
+	info, err := scionPath.GetCurrentInfoField()
+	if err != nil {
+		return processResult{}, err
+	}
+
+	p := scionPacketProcessor{
+		d:          d,
+		ingressID:  ingressID,
+		rawPkt:     rawPkt,
+		scionLayer: s,
+		origPacket: origPacket,
+		buffer:     buffer,
+		mac:        mac,
+		path:       scionPath,
+	}
+	result, err := p.process()
+	if err != nil {
+		// TODO(mawyss): Send back SCMP packet
+		return processResult{}, err
+	}
+
+	isPenultimate := scionPath.IsPenultimateHop()
+	isLast := scionPath.IsLastHop()
+
+	if isPenultimate || isLast {
+		timestamp := time.Unix(int64(info.Timestamp), 0)
+		if err = libepic.VerifyTimestamp(timestamp, path.PktID.Timestamp, time.Now()); err != nil {
+			// TODO(mawyss): Send back SCMP packet
+			return processResult{}, err
+		}
+
+		HVF := path.PHVF
+		if isLast {
+			HVF = path.LHVF
+		}
+		if err = libepic.VerifyHVF(p.cachedMac, path.PktID, &s, info.Timestamp, HVF); err != nil {
+			// TODO(mawyss): Send back SCMP packet
+			return processResult{}, err
+		}
+	}
+
+	return result, nil
 }
 
 type scionPacketProcessor struct {
@@ -677,6 +746,8 @@ type scionPacketProcessor struct {
 	origPacket []byte
 	// buffer is the buffer that can be used to serialize gopacket layers.
 	buffer gopacket.SerializeBuffer
+	// mac is the hasher for the MAC computation.
+	mac hash.Hash
 
 	// path is the raw SCION path. Will be set during processing.
 	path *scion.Raw
@@ -686,6 +757,10 @@ type scionPacketProcessor struct {
 	infoField *path.InfoField
 	// segmentChange indicates if the path segment was changed during processing.
 	segmentChange bool
+
+	// cachedMac contains the full 16 bytes of the MAC. Will be set during processing.
+	// For a hop performing an Xover, it is the MAC corresponding to the down segment.
+	cachedMac []byte
 }
 
 func (p *scionPacketProcessor) packSCMP(scmpH *slayers.SCMP, scmpP gopacket.SerializableLayer,
@@ -756,12 +831,6 @@ func (p *scionPacketProcessor) packSCMP(scmpH *slayers.SCMP, scmpP gopacket.Seri
 }
 
 func (p *scionPacketProcessor) parsePath() (processResult, error) {
-	var ok bool
-	p.path, ok = p.scionLayer.Path.(*scion.Raw)
-	if !ok {
-		// TODO(lukedirtwalker) parameter problem invalid path?
-		return processResult{}, malformedPath
-	}
 	var err error
 	p.hopField, err = p.path.GetCurrentHopField()
 	if err != nil {
@@ -892,17 +961,25 @@ func (p *scionPacketProcessor) currentHopPointer() uint16 {
 }
 
 func (p *scionPacketProcessor) verifyCurrentMAC() (processResult, error) {
-	if err := path.VerifyMAC(p.d.macFactory(), p.infoField, p.hopField); err != nil {
+	fullMac := path.FullMAC(p.mac, p.infoField, p.hopField)
+	if subtle.ConstantTimeCompare(p.hopField.Mac[:path.MacLen], fullMac[:path.MacLen]) == 0 {
 		return p.packSCMP(
 			&slayers.SCMP{TypeCode: slayers.CreateSCMPTypeCode(slayers.SCMPTypeParameterProblem,
 				slayers.SCMPCodeInvalidHopFieldMAC),
 			},
 			&slayers.SCMPParameterProblem{Pointer: p.currentHopPointer()},
-			serrors.WithCtx(err, "cons_dir", p.infoField.ConsDir, "if_id", p.ingressID,
-				"curr_inf", p.path.PathMeta.CurrINF, "curr_hf", p.path.PathMeta.CurrHF,
-				"seg_id", p.infoField.SegID),
+			serrors.New("MAC verification failed", "expected", fmt.Sprintf(
+				"%x", fullMac[:path.MacLen]),
+				"actual", fmt.Sprintf("%x", p.hopField.Mac[:path.MacLen]),
+				"cons_dir", p.infoField.ConsDir,
+				"if_id", p.ingressID, "curr_inf", p.path.PathMeta.CurrINF,
+				"curr_hf", p.path.PathMeta.CurrHF, "seg_id", p.infoField.SegID),
 		)
 	}
+	// Add the full MAC to the SCION packet processor,
+	// such that EPIC does not need to recalculate it.
+	p.cachedMac = fullMac
+
 	return processResult{}, nil
 }
 
@@ -1161,7 +1238,7 @@ func (p *scionPacketProcessor) process() (processResult, error) {
 }
 
 func (d *DataPlane) processOHP(ingressID uint16, rawPkt []byte, s slayers.SCION,
-	buffer gopacket.SerializeBuffer) (processResult, error) {
+	buffer gopacket.SerializeBuffer, mac hash.Hash) (processResult, error) {
 
 	p, ok := s.Path.(*onehop.Path)
 	if !ok {
@@ -1181,9 +1258,11 @@ func (d *DataPlane) processOHP(ingressID uint16, rawPkt []byte, s slayers.SCION,
 	}
 	// OHP leaving our IA
 	if d.localIA.Equal(s.SrcIA) {
-		if err := path.VerifyMAC(d.macFactory(), &p.Info, &p.FirstHop); err != nil {
+		mac := path.MAC(mac, &p.Info, &p.FirstHop)
+		if subtle.ConstantTimeCompare(p.FirstHop.Mac[:path.MacLen], mac) == 0 {
 			// TODO parameter problem -> invalid MAC
-			return processResult{}, serrors.WithCtx(err, "type", "ohp")
+			return processResult{}, serrors.New("MAC", "expected", fmt.Sprintf("%x", mac),
+				"actual", fmt.Sprintf("%x", p.FirstHop.Mac[:path.MacLen]), "type", "ohp")
 		}
 		p.Info.UpdateSegID(p.FirstHop.Mac)
 
@@ -1205,7 +1284,7 @@ func (d *DataPlane) processOHP(ingressID uint16, rawPkt []byte, s slayers.SCION,
 		ConsIngress: ingressID,
 		ExpTime:     p.FirstHop.ExpTime,
 	}
-	p.SecondHop.Mac = path.MAC(d.macFactory(), &p.Info, &p.SecondHop)
+	p.SecondHop.Mac = path.MAC(mac, &p.Info, &p.SecondHop)
 
 	if err := updateSCIONLayer(rawPkt, s, buffer); err != nil {
 		return processResult{}, err
@@ -1261,7 +1340,7 @@ type bfdSend struct {
 	conn             BatchConn
 	srcAddr, dstAddr *net.UDPAddr
 	srcIA, dstIA     addr.IA
-	macFactory       func() hash.Hash
+	mac              hash.Hash
 	ifID             uint16
 }
 
@@ -1269,6 +1348,9 @@ func (b *bfdSend) String() string {
 	return b.srcAddr.String()
 }
 
+// Send sends out a BFD message.
+// Due to the internal state of the MAC computation, this is not goroutine
+// safe.
 func (b *bfdSend) Send(bfd *layers.BFD) error {
 	scn := &slayers.SCION{
 		Version:      0,
@@ -1301,7 +1383,7 @@ func (b *bfdSend) Send(bfd *layers.BFD) error {
 				ExpTime:    hopFieldDefaultExpTime,
 			},
 		}
-		ohp.FirstHop.Mac = path.MAC(b.macFactory(), &ohp.Info, &ohp.FirstHop)
+		ohp.FirstHop.Mac = path.MAC(b.mac, &ohp.Info, &ohp.FirstHop)
 		scn.PathType = onehop.PathType
 		scn.Path = ohp
 	}
@@ -1341,7 +1423,12 @@ type scmpPacker struct {
 func (s scmpPacker) prepareSCMP(scmpH *slayers.SCMP, scmpP gopacket.SerializableLayer,
 	external bool, cause error) ([]byte, error) {
 
-	path := s.scionL.Path.(*scion.Raw)
+	path, ok := s.scionL.Path.(*scion.Raw)
+	if !ok {
+		return nil, serrors.WithCtx(cannotRoute, "details", "unsupported path type",
+			"path type", s.scionL.Path.Type())
+	}
+
 	decPath, err := path.ToDecoded()
 	if err != nil {
 		return nil, serrors.Wrap(cannotRoute, err, "details", "decoding raw path")
@@ -1439,6 +1526,32 @@ type pathIncrementer struct{}
 
 func (pathIncrementer) update(p *scion.Raw) error {
 	return p.IncPath()
+}
+
+// forwardingMetrics contains the subset of Metrics relevant for forwarding,
+// instantiated with some interface-specific labels.
+type forwardingMetrics struct {
+	InputBytesTotal     prometheus.Counter
+	OutputBytesTotal    prometheus.Counter
+	InputPacketsTotal   prometheus.Counter
+	OutputPacketsTotal  prometheus.Counter
+	DroppedPacketsTotal prometheus.Counter
+}
+
+func initForwardingMetrics(metrics *Metrics, labels prometheus.Labels) forwardingMetrics {
+	c := forwardingMetrics{
+		InputBytesTotal:     metrics.InputBytesTotal.With(labels),
+		InputPacketsTotal:   metrics.InputPacketsTotal.With(labels),
+		OutputBytesTotal:    metrics.OutputBytesTotal.With(labels),
+		OutputPacketsTotal:  metrics.OutputPacketsTotal.With(labels),
+		DroppedPacketsTotal: metrics.DroppedPacketsTotal.With(labels),
+	}
+	c.InputBytesTotal.Add(0)
+	c.InputPacketsTotal.Add(0)
+	c.OutputBytesTotal.Add(0)
+	c.OutputPacketsTotal.Add(0)
+	c.DroppedPacketsTotal.Add(0)
+	return c
 }
 
 func interfaceToMetricLabels(id uint16, localIA addr.IA,
