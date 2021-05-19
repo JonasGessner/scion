@@ -35,7 +35,7 @@ const (
 	// route around broken paths.
 	// This timeout needs to be long enough to allow for service address
 	// resolution and the QUIC handshake to complete (two roundtrips).
-	DefaultRPCDialTimeout time.Duration = 1 * time.Second
+	DefaultRPCDialTimeout time.Duration = 100 * time.Second
 )
 
 // Requester fetches segments from a remote using gRPC.

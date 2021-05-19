@@ -101,7 +101,7 @@ On other errors, showpaths will exit with code 2.
 			span.SetTag("dst.isd_as", dst)
 			defer span.Finish()
 
-			ctx, cancel := context.WithTimeout(traceCtx, flags.timeout)
+			ctx, cancel := context.WithTimeout(traceCtx, 100 * time.Second)
 			defer cancel()
 			res, err := showpaths.Run(ctx, dst, flags.cfg)
 			if err != nil {
